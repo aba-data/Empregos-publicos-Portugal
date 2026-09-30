@@ -1,354 +1,90 @@
 <!DOCTYPE html>
-<html lang="pt-PT">
+<html lang="pt">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Emprego Público & Concessões</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
-                    },
-                    colors: {
-                        brand: {
-                            50: '#eff6ff',
-                            100: '#dbeafe',
-                            500: '#3b82f6',
-                            600: '#2563eb',
-                            700: '#1d4ed8',
-                            800: '#1e40af',
-                            900: '#1e3a8a',
-                        }
-                    }
-                }
-            }
-        }
-    </script>
+    <title>Portal de Vagas Públicas</title>
     <style>
-        body {
-            background-color: #f8fafc;
-        }
-        .glass-panel {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-        }
-        /* Custom scrollbar */
-        ::-webkit-scrollbar {
-            width: 6px;
-        }
-        ::-webkit-scrollbar-track {
-            background: transparent; 
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #cbd5e1; 
-            border-radius: 10px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #94a3b8; 
-        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f3f4f6; margin: 0; padding: 20px; color: #1f2937; }
+        .cabecalho { text-align: center; margin-bottom: 30px; }
+        .cabecalho h1 { color: #1d4ed8; }
+        .filtros { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap; }
+        input, select { padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 16px; min-width: 200px; }
+        .grelha-vagas { display: grid; gap: 15px; max-width: 900px; margin: 0 auto; }
+        .vaga-cartao { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left: 4px solid #1d4ed8; }
+        .vaga-cartao h3 { margin: 0 0 10px 0; color: #111827; }
+        .tags { display: flex; gap: 10px; margin-bottom: 15px; font-size: 14px; color: #4b5563; }
+        .tag { background: #e5e7eb; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
+        .btn { display: inline-block; background: #1d4ed8; color: white; text-decoration: none; padding: 8px 16px; border-radius: 6px; font-weight: bold; }
+        .btn:hover { background: #1e40af; }
     </style>
 </head>
-<body class="text-slate-800 font-sans antialiased min-h-screen flex flex-col">
+<body>
 
-    <!-- Header -->
-    <header class="bg-brand-700 text-white shadow-md sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-center md:justify-start items-center h-16">
-                <div class="flex items-center gap-3">
-                    <div class="w-8 h-8 bg-white/20 rounded-md flex items-center justify-center">
-                        <i class="fa-solid fa-briefcase text-white"></i>
-                    </div>
-                    <span class="font-bold text-xl tracking-tight">Emprego Público <span class="font-light text-brand-100">& Concessões</span></span>
-                </div>
-            </div>
-        </div>
-    </header>
+    <div class="cabecalho">
+        <h1>Vagas Públicas & Estado</h1>
+        <p>Atualizado automaticamente pelo nosso Robô</p>
+    </div>
 
-    <!-- Search and Filter Section -->
-    <section class="bg-brand-600 pb-12 pt-8 px-4">
-        <div class="max-w-5xl mx-auto">
-            <h1 class="text-2xl md:text-3xl font-bold text-white mb-6 text-center md:text-left">
-                Encontre o seu próximo desafio
-            </h1>
-            
-            <div class="glass-panel p-4 md:p-6 rounded-2xl shadow-xl border border-white/20">
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    
-                    <!-- Search Input -->
-                    <div class="relative">
-                        <label for="search-input" class="sr-only">Procurar por vaga</label>
-                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <i class="fa-solid fa-magnifying-glass text-slate-400"></i>
-                        </div>
-                        <input type="text" id="search-input" placeholder="Procurar por vaga (ex: Engenheiro...)" 
-                            class="w-full pl-10 pr-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-all text-slate-700 bg-slate-50 focus:bg-white placeholder-slate-400">
-                    </div>
+    <div class="filtros">
+        <input type="text" id="filtro-nome" placeholder="Pesquisar por vaga..." onkeyup="filtrarVagas()">
+        <select id="filtro-entidade" onchange="filtrarVagas()">
+            <option value="">Todas as Entidades</option>
+            <option value="Infraestruturas de Portugal">Infraestruturas de Portugal</option>
+            <option value="Comboios de Portugal (CP)">Comboios de Portugal (CP)</option>
+        </select>
+    </div>
 
-                    <!-- District Dropdown -->
-                    <div class="relative">
-                        <label for="district-select" class="sr-only">Distrito</label>
-                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <i class="fa-solid fa-location-dot text-slate-400"></i>
-                        </div>
-                        <select id="district-select" class="w-full pl-10 pr-8 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-all text-slate-700 bg-slate-50 focus:bg-white appearance-none cursor-pointer">
-                            <option value="">Todos os Distritos</option>
-                            <option value="Nacional">Nacional / Remoto</option>
-                            <option value="Lisboa">Lisboa</option>
-                            <option value="Porto">Porto</option>
-                            <option value="Braga">Braga</option>
-                            <option value="Coimbra">Coimbra</option>
-                            <option value="Faro">Faro</option>
-                            <option value="Aveiro">Aveiro</option>
-                            <option value="Setúbal">Setúbal</option>
-                        </select>
-                        <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                            <i class="fa-solid fa-chevron-down text-slate-400 text-sm"></i>
-                        </div>
-                    </div>
-
-                    <!-- Entity Type Dropdown -->
-                    <div class="relative">
-                        <label for="entity-select" class="sr-only">Entidade</label>
-                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <i class="fa-solid fa-building text-slate-400"></i>
-                        </div>
-                        <select id="entity-select" class="w-full pl-10 pr-8 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-all text-slate-700 bg-slate-50 focus:bg-white appearance-none cursor-pointer">
-                            <option value="">Todas as Entidades</option>
-                            <option value="Administração Central">Administração Central</option>
-                            <option value="Administração Local">Administração Local</option>
-                            <option value="Empresas Públicas">Empresas Públicas</option>
-                            <option value="Concessões e PPPs">Concessões e PPPs</option>
-                        </select>
-                        <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                            <i class="fa-solid fa-chevron-down text-slate-400 text-sm"></i>
-                        </div>
-                    </div>
-                    
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Main Content / Results -->
-    <main class="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full -mt-6">
-        
-        <div class="flex justify-between items-center mb-6 px-2">
-            <h2 class="text-lg font-semibold text-slate-700">
-                Vagas disponíveis (<span id="results-count" class="text-brand-600">0</span>)
-            </h2>
-        </div>
-
-        <!-- Jobs Grid -->
-        <div id="jobs-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            <!-- Cards will be dynamically inserted here -->
-        </div>
-
-        <!-- Empty State (Hidden by default) -->
-        <div id="empty-state" class="hidden text-center py-20 bg-white rounded-2xl border border-slate-200 shadow-sm mt-4">
-            <div class="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <i class="fa-solid fa-magnifying-glass-minus text-2xl text-slate-400"></i>
-            </div>
-            <h3 class="text-xl font-medium text-slate-900 mb-2">Nenhuma vaga encontrada</h3>
-            <p class="text-slate-500 max-w-md mx-auto">Não conseguimos encontrar vagas que correspondam aos seus critérios de pesquisa. Tente alterar os filtros.</p>
-            <button id="reset-btn" class="mt-6 px-5 py-2.5 bg-brand-50 text-brand-700 font-medium rounded-lg hover:bg-brand-100 transition-colors">
-                Limpar Filtros
-            </button>
-        </div>
-    </main>
+    <div class="grelha-vagas" id="lista">
+        <p style="text-align:center;">A carregar vagas do robô...</p>
+    </div>
 
     <script>
-        // Realistic Mock Data for Portuguese Public Sector and Concessions
-        const jobs = [
-            {
-                id: 1,
-                title: "Engenheiro Civil - Planeamento",
-                entityName: "Infraestruturas de Portugal, S.A.",
-                category: "Empresas Públicas",
-                district: "Lisboa"
-            },
-            {
-                id: 2,
-                title: "Técnico Superior de Informática",
-                entityName: "Autoridade Tributária",
-                category: "Administração Central",
-                district: "Nacional"
-            },
-            {
-                id: 3,
-                title: "Enfermeiro Especialista (Urgência)",
-                entityName: "Hospital de Cascais (Lusíadas)",
-                category: "Concessões e PPPs",
-                district: "Lisboa"
-            },
-            {
-                id: 4,
-                title: "Assistente Operacional (Jardins)",
-                entityName: "Câmara Municipal do Porto",
-                category: "Administração Local",
-                district: "Porto"
-            },
-            {
-                id: 5,
-                title: "Piloto de Linha Aérea (A320)",
-                entityName: "TAP Air Portugal",
-                category: "Empresas Públicas",
-                district: "Lisboa"
-            },
-            {
-                id: 6,
-                title: "Distribuidor Postal (Carteiro)",
-                entityName: "CTT - Correios de Portugal",
-                category: "Concessões e PPPs",
-                district: "Faro"
-            },
-            {
-                id: 7,
-                title: "Técnico de Manutenção Elétrica",
-                entityName: "E-Redes",
-                category: "Concessões e PPPs",
-                district: "Coimbra"
-            },
-            {
-                id: 8,
-                title: "Médico de Saúde Pública",
-                entityName: "ARS Norte",
-                category: "Administração Central",
-                district: "Braga"
-            },
-            {
-                id: 9,
-                title: "Arquiteto Urbanista",
-                entityName: "Câmara Municipal de Faro",
-                category: "Administração Local",
-                district: "Faro"
-            },
-            {
-                id: 10,
-                title: "Revisor / Operador de Revisão",
-                entityName: "CP - Comboios de Portugal",
-                category: "Empresas Públicas",
-                district: "Nacional"
-            },
-            {
-                id: 11,
-                title: "Técnico de Apoio ao Cliente",
-                entityName: "Águas do Douro e Paiva",
-                category: "Empresas Públicas",
-                district: "Porto"
-            },
-            {
-                id: 12,
-                title: "Inspetor de Educação",
-                entityName: "Inspeção-Geral da Educação",
-                category: "Administração Central",
-                district: "Nacional"
-            },
-            {
-                id: 13,
-                title: "Técnico de Portagens",
-                entityName: "Brisa Concessão Rodoviária",
-                category: "Concessões e PPPs",
-                district: "Setúbal"
-            },
-            {
-                id: 14,
-                title: "Fiscal Municipal",
-                entityName: "Câmara Municipal de Aveiro",
-                category: "Administração Local",
-                district: "Aveiro"
-            }
-        ];
+        let todasAsVagas = [];
 
-        // DOM Elements
-        const searchInput = document.getElementById('search-input');
-        const districtSelect = document.getElementById('district-select');
-        const entitySelect = document.getElementById('entity-select');
-        const jobsGrid = document.getElementById('jobs-grid');
-        const resultsCount = document.getElementById('results-count');
-        const emptyState = document.getElementById('empty-state');
-        const resetBtn = document.getElementById('reset-btn');
-
-        // Function to render job cards
-        function renderJobs(jobsToRender) {
-            jobsGrid.innerHTML = '';
-            resultsCount.textContent = jobsToRender.length;
-
-            if (jobsToRender.length === 0) {
-                emptyState.classList.remove('hidden');
-                jobsGrid.classList.add('hidden');
-            } else {
-                emptyState.classList.add('hidden');
-                jobsGrid.classList.remove('hidden');
-
-                jobsToRender.forEach(job => {
-                    // Create card element
-                    const card = document.createElement('div');
-                    card.className = "bg-white rounded-xl p-5 border border-slate-200 shadow-sm hover:shadow-md hover:-translate-y-1 transition-all duration-300 flex flex-col h-full";
-                    
-                    card.innerHTML = `
-                        <div class="flex-grow">
-                            <h3 class="text-lg font-bold text-brand-900 mb-2 leading-tight">${job.title}</h3>
-                            <div class="text-slate-600 font-medium text-sm mb-3">
-                                ${job.entityName}
-                            </div>
-                            <div class="flex items-center text-slate-500 text-sm">
-                                <i class="fa-solid fa-location-dot mr-2 text-brand-500"></i>
-                                ${job.district}
-                            </div>
-                        </div>
-                        <div class="mt-5 pt-4 border-t border-slate-100">
-                            <button class="w-full bg-slate-50 hover:bg-brand-50 text-brand-600 border border-slate-200 hover:border-brand-200 font-medium py-2 rounded-lg transition-colors text-sm">
-                                Ver Vaga
-                            </button>
-                        </div>
-                    `;
-                    jobsGrid.appendChild(card);
-                });
-            }
-        }
-
-        // Function to filter jobs based on inputs
-        function filterJobs() {
-            const searchTerm = searchInput.value.toLowerCase().trim();
-            const selectedDistrict = districtSelect.value;
-            const selectedEntity = entitySelect.value;
-
-            const filtered = jobs.filter(job => {
-                const matchesSearch = job.title.toLowerCase().includes(searchTerm) || 
-                                      job.entityName.toLowerCase().includes(searchTerm);
-                const matchesDistrict = selectedDistrict === "" || job.district === selectedDistrict;
-                const matchesEntity = selectedEntity === "" || job.category === selectedEntity;
-
-                return matchesSearch && matchesDistrict && matchesEntity;
+        // Esta função vai ao ficheiro vagas.json (alimentado pelo robô) buscar os dados
+        fetch('vagas.json')
+            .then(resposta => resposta.json())
+            .then(dados => {
+                todasAsVagas = dados;
+                mostrarVagas(todasAsVagas);
             });
 
-            renderJobs(filtered);
+        function mostrarVagas(vagas) {
+            const lista = document.getElementById('lista');
+            lista.innerHTML = '';
+            
+            if (vagas.length === 0) {
+                lista.innerHTML = '<p style="text-align:center;">Nenhuma vaga encontrada.</p>';
+                return;
+            }
+
+            vagas.forEach(vaga => {
+                lista.innerHTML += `
+                    <div class="vaga-cartao">
+                        <h3>${vaga.titulo}</h3>
+                        <div class="tags">
+                            <span class="tag">🏢 ${vaga.entidade}</span>
+                            <span class="tag">📍 ${vaga.distrito}</span>
+                        </div>
+                        <a href="${vaga.url}" target="_blank" class="btn">Ver Detalhes</a>
+                    </div>
+                `;
+            });
         }
 
-        // Function to reset filters
-        function resetFilters() {
-            searchInput.value = '';
-            districtSelect.value = '';
-            entitySelect.value = '';
-            filterJobs();
+        function filtrarVagas() {
+            const texto = document.getElementById('filtro-nome').value.toLowerCase();
+            const entidade = document.getElementById('filtro-entidade').value;
+
+            const vagasFiltradas = todasAsVagas.filter(vaga => {
+                const bateCertoTexto = vaga.titulo.toLowerCase().includes(texto);
+                const bateCertoEntidade = entidade === "" || vaga.entidade === entidade;
+                return bateCertoTexto && bateCertoEntidade;
+            });
+
+            mostrarVagas(vagasFiltradas);
         }
-
-        // Event Listeners for Real-time filtering
-        searchInput.addEventListener('input', filterJobs);
-        districtSelect.addEventListener('change', filterJobs);
-        entitySelect.addEventListener('change', filterJobs);
-        resetBtn.addEventListener('click', resetFilters);
-
-        // Initial render on page load
-        document.addEventListener('DOMContentLoaded', () => {
-            renderJobs(jobs);
-        });
-
     </script>
 </body>
 </html>
