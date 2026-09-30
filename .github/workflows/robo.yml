@@ -35,4 +35,5 @@ jobs:
           git config --global user.email "robo@vagas.pt"
           git add vagas.json
           git commit -m "Robô: Vagas de Portugal atualizadas" || echo "Sem novas vagas"
+          git pull --rebase origin main
           git push
