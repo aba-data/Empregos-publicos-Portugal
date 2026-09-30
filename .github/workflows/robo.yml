@@ -2,8 +2,8 @@ name: O Meu Robo de Vagas
 
 on:
   schedule:
-    - cron: '0 * * * *' # Corre no minuto zero de todas as horas
-  workflow_dispatch: # Permite-me clicar num botão para correr manualmente
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 jobs:
   atualizar-site:
@@ -16,6 +16,9 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+
+      - name: Instalar Ferramentas de Scraping
+        run: pip install requests beautifulsoup4
 
       - name: Correr o script scraper.py
         run: python scraper.py
