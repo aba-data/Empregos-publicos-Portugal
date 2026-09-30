@@ -24,6 +24,7 @@ jobs:
         run: |
           pip install playwright bs4 requests
           playwright install chromium
+          playwright install-deps
 
       - name: Correr o script scraper.py
         run: python scraper.py
