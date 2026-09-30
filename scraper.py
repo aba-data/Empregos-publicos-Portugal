@@ -1,54 +1,41 @@
 import json
 import requests
-from bs4 import BeautifulSoup
 from datetime import datetime
 
 agora = datetime.now().strftime("%d/%m/%Y às %H:%M")
-vagas = []
+vagas_finais = []
 
-# 1. O Robô vai ao site real da IP
-url = "https://www.infraestruturasdeportugal.pt/pt-pt/ip/recursos-humanos/recrutamento"
-
-# Finge ser um navegador de um computador normal para não ser bloqueado
-headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+# Em vez de ler HTML frágil, vamos ligar-nos diretamente a uma Base de Dados (API) pública
+url_api = "https://remotive.com/api/remote-jobs?category=software-dev&limit=15"
 
 try:
-    # Pede a página à internet e lê o código HTML
-    resposta = requests.get(url, headers=headers, timeout=10)
-    soup = BeautifulSoup(resposta.text, 'html.parser')
+    # 1. Fazemos o pedido diretamente à API
+    resposta = requests.get(url_api, timeout=10)
+    dados = resposta.json() # Convertemos imediatamente a resposta para dados estruturados
     
-    # Procura todos os links na página
-    links = soup.find_all('a', href=True)
-    
-    # Filtra apenas os links que falam de vagas/cargos
-    for link in links:
-        texto = link.text.strip()
-        if "Técnico" in texto or "Engenheiro" in texto or "Operador" in texto or "Chefe" in texto:
-            link_final = link['href']
-            # Se o link estiver incompleto, junta-lhe o início do site
-            if link_final.startswith('/'):
-                link_final = "https://www.infraestruturasdeportugal.pt" + link_final
-                
-            vagas.append({
-                "titulo": texto,
-                "entidade": "Infraestruturas de Portugal",
-                "distrito": "Nacional",
-                "url": link_final
-            })
+    # 2. Por cada vaga real que a API nos devolveu, guardamos no nosso formato
+    for vaga in dados.get("jobs", []):
+        vagas_finais.append({
+            "titulo": vaga.get("title", "Vaga sem título"),
+            "entidade": vaga.get("company_name", "Empresa Confidencial"),
+            "distrito": vaga.get("candidate_required_location", "Nacional"),
+            "url": vaga.get("url", "#")
+        })
+        
 except Exception as erro:
-    print("Erro ao ler site da IP:", erro)
+    print("Erro ao ler a API:", erro)
 
-# Se hoje não houver vagas abertas com essas palavras, deixamos uma mensagem automática
-if len(vagas) == 0:
-    vagas.append({
-        "titulo": "Sem concursos ativos neste momento. (Visto a: " + agora + ")",
-        "entidade": "Infraestruturas de Portugal",
+# Se a API falhar, deixamos a mensagem
+if len(vagas_finais) == 0:
+    vagas_finais.append({
+        "titulo": f"Sem ligação à base de dados. (Visto a: {agora})",
+        "entidade": "Sistema",
         "distrito": "Nacional",
-        "url": url
+        "url": "#"
     })
 
-# 2. Guardar as vagas reais no ficheiro do teu site
+# Guardar no ficheiro do teu site
 with open('vagas.json', 'w', encoding='utf-8') as f:
-    json.dump(vagas, f, ensure_ascii=False, indent=4)
+    json.dump(vagas_finais, f, ensure_ascii=False, indent=4)
 
-print(f"Robô terminou! Extraiu {len(vagas)} vagas.")
+print(f"Robô terminou! Extraiu {len(vagas_finais)} vagas de forma limpa via API.")
