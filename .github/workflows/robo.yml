@@ -20,8 +20,10 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Instalar Ferramentas de Scraping
-        run: pip install requests beautifulsoup4
+      - name: Instalar Navegador Fantasma
+        run: |
+          pip install playwright bs4 requests
+          playwright install chromium
 
       - name: Correr o script scraper.py
         run: python scraper.py
@@ -31,5 +33,5 @@ jobs:
           git config --global user.name "Robo Trabalhador"
           git config --global user.email "robo@vagas.pt"
           git add vagas.json
-          git commit -m "Robô: Atualizou as vagas automaticamente" || echo "Sem novas vagas"
+          git commit -m "Robô: Vagas de Portugal atualizadas" || echo "Sem novas vagas"
           git push
