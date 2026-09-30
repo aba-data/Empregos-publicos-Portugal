@@ -12,21 +12,21 @@ with sync_playwright() as p:
     page = browser.new_page()
     
     try:
-        print("A visitar a Infraestruturas de Portugal...")
-        page.goto("https://www.infraestruturasdeportugal.pt/pt-pt/ip/recursos-humanos/recrutamento", timeout=30000)
+        print("A visitar a NOVA página de carreiras da IP...")
+        # O LINK CORRETO QUE ENCONTRASTE!
+        page.goto("https://www.infraestruturasdeportugal.pt/pt-pt/carreiras", timeout=30000)
         page.wait_for_timeout(3000)
         
         links = page.query_selector_all("a")
         for link in links:
             texto = link.inner_text().strip()
             
-            # Apanha TUDO o que for um link com texto suficientemente longo para ser uma vaga
-            # e ignora links de lixo típicos dos menus do site.
-            lixo_comum = ["política de privacidade", "contactos", "início", "pesquisar", "termos", "infraestruturas"]
+            # Ignoramos botões curtos e links de menu, apanhamos os títulos longos das vagas
+            lixo_comum = ["política de", "contactos", "início", "pesquisar", "termos", "carreiras", "saber mais", "candidatura"]
             
-            if len(texto) > 10 and not any(lixo in texto.lower() for lixo in lixo_comum):
+            if len(texto) > 12 and not any(lixo in texto.lower() for lixo in lixo_comum):
                 href = link.get_attribute("href")
-                if href:
+                if href and not href.startswith('#'):
                     link_final = "https://www.infraestruturasdeportugal.pt" + href if href.startswith('/') else href
                     vagas_reais.append({
                         "titulo": texto,
@@ -35,21 +35,22 @@ with sync_playwright() as p:
                         "url": link_final
                     })
     except Exception as erro:
-        print("Aviso ao ler a IP:", erro)
+        print("Aviso ao ler vagas:", erro)
         
     browser.close()
 
+# Limpar possíveis links duplicados
 vagas_unicas = [dict(t) for t in {tuple(d.items()) for d in vagas_reais}]
 
 if len(vagas_unicas) == 0:
     vagas_unicas.append({
-        "titulo": f"Monitorização ativa. Nenhuma vaga publicada. (Visto a: {agora})",
+        "titulo": f"Monitorização ativa. Nenhuma vaga encontrada. (Visto a: {agora})",
         "entidade": "Infraestruturas de Portugal",
         "distrito": "Nacional",
-        "url": "https://www.infraestruturasdeportugal.pt/pt-pt/ip/recursos-humanos/recrutamento"
+        "url": "https://www.infraestruturasdeportugal.pt/pt-pt/carreiras"
     })
 
 with open('vagas.json', 'w', encoding='utf-8') as f:
     json.dump(vagas_unicas, f, ensure_ascii=False, indent=4)
 
-print(f"Terminado! Extraídas {len(vagas_unicas)} vagas.")
+print(f"Terminado! Extraídas {len(vagas_unicas)} vagas da página certa.")
