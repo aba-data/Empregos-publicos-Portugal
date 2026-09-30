@@ -12,26 +12,33 @@ with sync_playwright() as p:
     page = browser.new_page()
     
     try:
-        print("A visitar a NOVA página de carreiras da IP...")
-        # O LINK CORRETO QUE ENCONTRASTE!
-        page.goto("https://www.infraestruturasdeportugal.pt/pt-pt/carreiras", timeout=30000)
+        print("A visitar a VERDADEIRA página de recrutamento da IP...")
+        # Vamos à página principal desse portal secreto que descobriste
+        page.goto("https://recrutamento.infraestruturasdeportugal.pt/jobs", timeout=30000)
         page.wait_for_timeout(3000)
         
         links = page.query_selector_all("a")
         for link in links:
+            href = link.get_attribute("href")
             texto = link.inner_text().strip()
             
-            # Ignoramos botões curtos e links de menu, apanhamos os títulos longos das vagas
-            lixo_comum = ["política de", "contactos", "início", "pesquisar", "termos", "carreiras", "saber mais", "candidatura"]
-            
-            if len(texto) > 12 and not any(lixo in texto.lower() for lixo in lixo_comum):
-                href = link.get_attribute("href")
-                if href and not href.startswith('#'):
-                    link_final = "https://www.infraestruturasdeportugal.pt" + href if href.startswith('/') else href
+            # A REGRA DE OURO: Só aceitamos links que vão para dentro de "/jobs/" e que tenham texto
+            if href and "/jobs/" in href and len(texto) > 8:
+                # Ignoramos a própria página de listagem de trabalhos
+                if href != "/jobs" and href != "https://recrutamento.infraestruturasdeportugal.pt/jobs":
+                    
+                    link_final = href
+                    if href.startswith('/'):
+                        link_final = "https://recrutamento.infraestruturasdeportugal.pt" + href
+                        
+                    # Como o texto do link às vezes traz a data ou local colados, 
+                    # cortamos e apanhamos só a primeira linha (o Título da vaga)
+                    titulo_limpo = texto.split('\n')[0]
+                    
                     vagas_reais.append({
-                        "titulo": texto,
+                        "titulo": titulo_limpo,
                         "entidade": "Infraestruturas de Portugal",
-                        "distrito": "Nacional",
+                        "distrito": "Nacional / Vários",
                         "url": link_final
                     })
     except Exception as erro:
@@ -39,18 +46,23 @@ with sync_playwright() as p:
         
     browser.close()
 
-# Limpar possíveis links duplicados
-vagas_unicas = [dict(t) for t in {tuple(d.items()) for d in vagas_reais}]
+# O truque mágico para limpar vagas que apareçam repetidas na página
+vagas_unicas = []
+vistos = set()
+for vaga in vagas_reais:
+    if vaga['url'] not in vistos:
+        vagas_unicas.append(vaga)
+        vistos.add(vaga['url'])
 
 if len(vagas_unicas) == 0:
     vagas_unicas.append({
         "titulo": f"Monitorização ativa. Nenhuma vaga encontrada. (Visto a: {agora})",
         "entidade": "Infraestruturas de Portugal",
         "distrito": "Nacional",
-        "url": "https://www.infraestruturasdeportugal.pt/pt-pt/carreiras"
+        "url": "https://recrutamento.infraestruturasdeportugal.pt/jobs"
     })
 
 with open('vagas.json', 'w', encoding='utf-8') as f:
     json.dump(vagas_unicas, f, ensure_ascii=False, indent=4)
 
-print(f"Terminado! Extraídas {len(vagas_unicas)} vagas da página certa.")
+print(f"Sucesso total! Extraídas {len(vagas_unicas)} vagas perfeitas da IP.")
