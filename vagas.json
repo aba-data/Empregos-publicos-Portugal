@@ -24,18 +24,6 @@
         "url": "https://recrutamento.infraestruturasdeportugal.pt/jobs/tecnico-de-exploracao-de-infraestruturas-m-f-coimbra"
     },
     {
-        "titulo": "Trainee de Automação, IA e Transformação Digital (M/F) – ALMADA / LISBOA",
-        "entidade": "Infraestruturas de Portugal",
-        "distrito": "Nacional / Vários",
-        "url": "https://recrutamento.infraestruturasdeportugal.pt/jobs/trainee-de-automacao-ia-e-transformacao-digital-m-f-almada-lisboa"
-    },
-    {
-        "titulo": "Trainee de Sistemas de Informação (M/F) – ALMADA / LISBOA",
-        "entidade": "Infraestruturas de Portugal",
-        "distrito": "Nacional / Vários",
-        "url": "https://recrutamento.infraestruturasdeportugal.pt/jobs/trainee-de-sistemas-de-informacao-m-f-almada-lisboa"
-    },
-    {
         "titulo": "Encarregado de Infraestruturas - Via e Geotecnia (M/F) - PINHAL NOVO",
         "entidade": "Infraestruturas de Portugal",
         "distrito": "Nacional / Vários",
@@ -58,5 +46,17 @@
         "entidade": "Infraestruturas de Portugal",
         "distrito": "Nacional / Vários",
         "url": "https://recrutamento.infraestruturasdeportugal.pt/jobs/encarregado-geotecnia-m-f-entroncamento-792f02c8-9d92-488d-9b7b-087fa67164f4"
+    },
+    {
+        "titulo": "Técnico Superior - Licenciamento e Fiscalização Rodo e Ferroviária (M/F) - FARO ou BEJA",
+        "entidade": "Infraestruturas de Portugal",
+        "distrito": "Nacional / Vários",
+        "url": "https://recrutamento.infraestruturasdeportugal.pt/jobs/tecnico-superior-licenciamento-e-fiscalizacao-rodo-e-ferroviaria-m-f-faro-ou-beja"
+    },
+    {
+        "titulo": "Advogado - Contencioso (M/F) - ALMADA / LISBOA",
+        "entidade": "Infraestruturas de Portugal",
+        "distrito": "Nacional / Vários",
+        "url": "https://recrutamento.infraestruturasdeportugal.pt/jobs/advogado-contencioso-m-f-almada-lisboa"
     }
 ]
