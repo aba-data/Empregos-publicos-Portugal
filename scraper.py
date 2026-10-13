@@ -6,90 +6,74 @@ from datetime import datetime
 agora = datetime.now().strftime("%d/%m/%Y às %H:%M")
 vagas_reais = []
 
-print("A iniciar o Navegador Fantasma com escuta de elementos dinâmicos...")
+locais_conhecidos = [
+    "Lisboa", "Porto", "Braga", "Setúbal", "Aveiro", "Faro", "Coimbra", 
+    "Leiria", "Santarém", "Viseu", "Viana do Castelo", "Vila Real", 
+    "Castelo Branco", "Guarda", "Évora", "Beja", "Bragança", "Portalegre", 
+    "Almada", "Entroncamento", "Pinhal Novo", "Nelas", "Zona Sul", "Santa Apolónia"
+]
+
+print("A iniciar o Navegador Fantasma com varregura profunda até 20 páginas...")
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
     page = browser.new_page()
     
     try:
-        url_base = "https://recrutamento.infraestruturasdeportugal.pt/jobs"
-        print(f"A aceder a {url_base}...")
-        
-        page.goto(url_base, timeout=30000)
-        # Dar tempo para o site injetar todo o conteúdo via JavaScript
-        page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(5000)
-        
-        # Fazer scroll para baixo para garantir que o site carrega tudo se tiver scroll infinito
-        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        page.wait_for_timeout(2000)
-        
-        # Vamos procurar todos os blocos/cartões ou links que contenham /jobs/
-        elementos = page.query_selector_all("a[href*='/jobs/']")
-        print(f"Total de links brutos encontrados: {len(elementos)}")
-        
-        for el in elementos:
-            try:
-                href = el.get_attribute("href")
-                texto = el.inner_text().strip()
+        # Aumentado o ciclo de varregura de 0 até 20 páginas
+        for num_pag in range(0, 21):
+            url_pagina = f"https://www.infraestruturasdeportugal.pt/pt-pt/carreiras?page={num_pag}"
+            print(f"A visitar: {url_pagina}")
+            
+            page.goto(url_pagina, timeout=30000)
+            page.wait_for_timeout(3000)
+            
+            links = page.query_selector_all("a")
+            vagas_encontradas_nesta_pagina = 0
+            
+            for link in links:
+                href = link.get_attribute("href")
+                texto = link.inner_text().strip()
                 
-                # Filtrar apenas links de vagas reais
-                if href and "/jobs/" in href:
-                    if href != "/jobs" and "page=" not in href and "tag=" not in href:
+                if href and len(texto) > 12:
+                    lixo_comum = ["política", "contactos", "início", "pesquisar", "termos", "carreiras", "saber mais", "candidatura", "cookies", "privacidade"]
+                    if any(lixo in texto.lower() for lixo in lixo_comum):
+                        continue
                         
-                        link_final = href if not href.startswith('/') else "https://recrutamento.infraestruturasdeportugal.pt" + href
+                    if "/carreiras/" in href or "/recrutamento/" in href or "/jobs/" in href or "oportunidade" in href.lower():
+                        link_final = href if href.startswith('http') else "https://www.infraestruturasdeportugal.pt" + href
                         
-                        # Limpar o texto recolhido
-                        linhas = [l.strip() for l in texto.split('\n') if l.strip()]
-                        if not linhas:
-                            continue
-                            
-                        # A primeira linha costuma ser o título da vaga
-                        titulo_bruto = linhas[0]
-                        
-                        # Ignorar lixo de navegação
-                        if any(termo in titulo_bruto.lower() for termo in ["política", "cookies", "carreiras", "início", "contacto"]):
-                            continue
-                            
+                        texto_limpo = texto.split('\n')[0].strip()
                         distrito = "Nacional / Vários"
                         
-                        # Tentar extrair o distrito do texto do elemento ou do título
-                        texto_completo = " ".join(linhas)
-                        
-                        # Procurar por padrões conhecidos de localização no texto completo
-                        locais = ["Lisboa", "Porto", "Braga", "Setúbal", "Aveiro", "Faro", "Coimbra", 
-                                  "Leiria", "Santarém", "Viseu", "Viana do Castelo", "Vila Real", 
-                                  "Castelo Branco", "Guarda", "Évora", "Beja", "Bragança", "Portalegre", 
-                                  "Almada", "Entroncamento", "Pinhal Novo", "Nelas", "Zona Sul", "Santa Apolónia"]
-                        
-                        for loc in locais:
+                        texto_completo = texto_limpo + " " + link_final
+                        locais_encontrados = []
+                        for loc in locais_conhecidos:
                             if loc.lower() in texto_completo.lower():
-                                distrito = loc
-                                break
+                                locais_encontrados.append(loc)
                         
-                        # Se tiver (M/F), limpamos o título para ficar elegante
-                        if "(M/F)" in titulo_bruto.upper():
-                            partes = re.split(r'\(M/F\)', titulo_bruto, flags=re.IGNORECASE)
-                            titulo_limpo = partes[0].strip() + " (M/F)"
-                        else:
-                            titulo_limpo = titulo_bruto
-
+                        if locais_encontrados:
+                            distrito = " / ".join(dict.fromkeys(locais_encontrados))
+                        
                         vagas_reais.append({
-                            "titulo": titulo_limpo,
+                            "titulo": texto_limpo,
                             "entidade": "Infraestruturas de Portugal",
                             "distrito": distrito,
                             "url": link_final
                         })
-            except Exception as e:
-                continue
+                        vagas_encontradas_nesta_pagina += 1
+            
+            # Se uma página acima da 0 não trouxer vagas, o site esgotou-se e podemos parar para poupar tempo
+            if vagas_encontradas_nesta_pagina == 0 and num_pag > 0:
+                print(f"Página {num_pag} vazia. Fim da recolha.")
+                break
                 
     except Exception as erro:
-        print("Erro ao processar o portal:", erro)
+        print("Aviso ao ler as páginas de carreiras:", erro)
         
     browser.close()
 
-# Remover duplicados rigorosos por URL
+# Remover duplicados exatos por URL
 vagas_unicas = []
 vistos = set()
 for vaga in vagas_reais:
@@ -102,10 +86,10 @@ if len(vagas_unicas) == 0:
         "titulo": f"Monitorização ativa. Nenhuma vaga encontrada. (Visto a: {agora})",
         "entidade": "Infraestruturas de Portugal",
         "distrito": "Nacional",
-        "url": "https://recrutamento.infraestruturasdeportugal.pt/jobs"
+        "url": "https://www.infraestruturasdeportugal.pt/pt-pt/carreiras"
     })
 
 with open('vagas.json', 'w', encoding='utf-8') as f:
     json.dump(vagas_unicas, f, ensure_ascii=False, indent=4)
 
-print(f"Extração concluída com sucesso! Total de vagas reais unicas: {len(vagas_unicas)}")
+print(f"Sucesso! Extraídas {len(vagas_unicas)} vagas das 20 páginas analisadas.")
