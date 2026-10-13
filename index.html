@@ -1,105 +1,28 @@
-<!DOCTYPE html>
-<html lang="pt">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Portal de Vagas Públicas</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f3f4f6; margin: 0; padding: 20px; color: #1f2937; }
-        .cabecalho { text-align: center; margin-bottom: 30px; }
-        .cabecalho h1 { color: #1d4ed8; }
-        .filtros { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap; }
-        input, select { padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 16px; min-width: 200px; background: white; }
-        .grelha-vagas { display: grid; gap: 15px; max-width: 900px; margin: 0 auto; }
-        .vaga-cartao { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left: 4px solid #1d4ed8; }
-        .vaga-cartao h3 { margin: 0 0 10px 0; color: #111827; }
-        .tags { display: flex; gap: 10px; margin-bottom: 15px; font-size: 14px; color: #4b5563; flex-wrap: wrap; }
-        .tag { background: #e5e7eb; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
-        .btn { display: inline-block; background: #1d4ed8; color: white; text-decoration: none; padding: 8px 16px; border-radius: 6px; font-weight: bold; }
-        .btn:hover { background: #1e40af; }
-    </style>
-</head>
-<body>
 
-    <div class="cabecalho">
-        <h1>Vagas em Empresas Públicas em Portugal</h1>
-        <p>Portal de Recrutamento Automatizado</p>
-    </div>
+fetch('./vagas.json?v=' + Date.now())
+  .then(resposta => {
+    if (!resposta.ok) {
+      throw new Error(`Erro HTTP ${resposta.status}`);
+    }
+    return resposta.json();
+  })
+  .then(dados => {
+    if (!Array.isArray(dados)) {
+      throw new Error('O ficheiro de vagas não contém uma lista válida.');
+    }
 
-    <div class="filtros">
-        <input type="text" id="filtro-nome" placeholder="Pesquisar por cargo..." onkeyup="filtrarVagas()">
-        
-        <select id="filtro-entidade" onchange="filtrarVagas()">
-            <option value="">Todas as Entidades</option>
-            <option value="Infraestruturas de Portugal">Infraestruturas de Portugal</option>
-        </select>
+    todasAsVagas = dados;
+    mostrarVagas(todasAsVagas);
+  })
+  .catch(erro => {
+    console.error('Erro ao carregar as vagas:', erro);
 
-        <select id="filtro-distrito" onchange="filtrarVagas()">
-            <option value="">Todos os Distritos / Locais</option>
-            <option value="Lisboa">Lisboa</option>
-            <option value="Porto">Porto</option>
-            <option value="Almada">Almada</option>
-            <option value="Coimbra">Coimbra</option>
-            <option value="Faro">Faro</option>
-            <option value="Braga">Braga</option>
-            <option value="Setúbal">Setúbal</option>
-            <option value="Aveiro">Aveiro</option>
-            <option value="Nacional">Nacional / Vários</option>
-        </select>
-    </div>
-
-    <div class="grelha-vagas" id="lista">
-        <p style="text-align:center;">A carregar vagas do robô...</p>
-    </div>
-
-    <script>
-        let todasAsVagas = [];
-
-        fetch('vagas.json?v=' + new Date().getTime())
-            .then(resposta => resposta.json())
-            .then(dados => {
-                todasAsVagas = dados;
-                mostrarVagas(todasAsVagas);
-            });
-
-        function mostrarVagas(vagas) {
-            const lista = document.getElementById('lista');
-            lista.innerHTML = '';
-            
-            if (vagas.length === 0) {
-                lista.innerHTML = '<p style="text-align:center;">Nenhuma vaga corresponde aos critérios selecionados.</p>';
-                return;
-            }
-
-            vagas.forEach(vaga => {
-                lista.innerHTML += `
-                    <div class="vaga-cartao">
-                        <h3>${vaga.titulo}</h3>
-                        <div class="tags">
-                            <span class="tag">🏢 ${vaga.entidade}</span>
-                            <span class="tag">📍 ${vaga.distrito}</span>
-                        </div>
-                        <a href="${vaga.url}" target="_blank" class="btn">Ver Detalhes e Candidatar</a>
-                    </div>
-                `;
-            });
-        }
-
-        function filtrarVagas() {
-            const texto = document.getElementById('filtro-nome').value.toLowerCase();
-            const entidade = document.getElementById('filtro-entidade').value;
-            const distrito = document.getElementById('filtro-distrito').value.toLowerCase();
-
-            const vagasFiltradas = todasAsVagas.filter(vaga => {
-                const bateCertoTexto = vaga.titulo.toLowerCase().includes(texto);
-                const bateCertoEntidade = entidade === "" || vaga.entidade === entidade;
-                const bateCertoDistrito = distrito === "" || vaga.distrito.toLowerCase().includes(distrito);
-                
-                return bateCertoTexto && bateCertoEntidade && bateCertoDistrito;
-            });
-
-            mostrarVagas(vagasFiltradas);
-        }
-    </script>
-</body>
-</html>
+    document.getElementById('lista').innerHTML = `
+      <p style="text-align:center;">
+        Não foi possível carregar as vagas.
+        <a href="https://recrutamento.infraestruturasdeportugal.pt/jobs/">
+          Consultar o portal oficial da IP
+        </a>
+      </p>
+    `;
+  });
