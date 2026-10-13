@@ -13,30 +13,30 @@ locais_conhecidos = [
     "Almada", "Entroncamento", "Pinhal Novo", "Nelas", "Santa Apolónia"
 ]
 
-print("A iniciar o Navegador Fantasma com suporte a múltiplas páginas...")
+print("A iniciar o Navegador Fantasma com paginação por URL direta...")
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
     page = browser.new_page()
     
     try:
-        url_base = "https://recrutamento.infraestruturasdeportugal.pt/jobs"
-        page.goto(url_base, timeout=30000)
-        page.wait_for_timeout(3000)
-        
-        pagina_atual = 1
-        max_paginas = 10 # Limite de segurança para evitar loops infinitos
-        
-        while pagina_atual <= max_paginas:
-            print(f"A ler a página {pagina_atual}...")
+        # Vamos percorrer as páginas de 1 até 10 de forma direta
+        for numero_pagina in range(1, 11):
+            url_pagina = f"https://recrutamento.infraestruturasdeportugal.pt/jobs?page={numero_pagina}"
+            print(f"A visitar: {url_pagina}")
+            
+            page.goto(url_pagina, timeout=30000)
+            page.wait_for_timeout(2500)
             
             links = page.query_selector_all("a")
+            vagas_nesta_pagina = 0
+            
             for link in links:
                 href = link.get_attribute("href")
                 texto = link.inner_text().strip()
                 
                 if href and "/jobs/" in href and len(texto) > 8:
-                    if href != "/jobs" and href != "https://recrutamento.infraestruturasdeportugal.pt/jobs":
+                    if href != "/jobs" and not href.endswith('/jobs?page=' + str(numero_pagina)):
                         
                         link_final = href if not href.startswith('/') else "https://recrutamento.infraestruturasdeportugal.pt" + href
                         texto_limpo = texto.split('\n')[0].strip()
@@ -62,37 +62,19 @@ with sync_playwright() as p:
                             "distrito": distrito_final,
                             "url": link_final
                         })
+                        vagas_nesta_pagina += 1
             
-            # Tentar encontrar e clicar no botão "Seguinte" (próxima página)
-            try:
-                # Procura por botões comuns de paginação (setas ou texto de próxima página)
-                botao_seguinte = page.query_selector("a[rel='next'], .pagination-next a, li.pagination-next a, button.next")
-                if not botao_seguinte:
-                    # Alternativa: procurar links que contenham texto de avanço
-                    elementos_a = page.query_selector_all("a")
-                    for el in elementos_a:
-                        txt_el = el.inner_text().lower()
-                        if "seguinte" in txt_el or "»" in txt_el or ">" in txt_el:
-                            # Verifica se não é o mesmo botão já clicado
-                            botao_seguinte = el
-                            break
-                
-                if botao_seguinte and botao_seguinte.is_visible():
-                    botao_seguinte.click()
-                    page.wait_for_timeout(3000)
-                    pagina_atual += 1
-                else:
-                    # Se não houver botão seguinte, terminamos a paginação
-                    break
-            except Exception:
+            # Se uma página não trouxer nenhuma vaga nova, significa que chegámos ao fim
+            if vagas_nesta_pagina == 0 and numero_pagina > 1:
+                print( ગૃહ(f"Página {numero_pagina} vazia. Fim da recolha.")
                 break
                 
     except Exception as erro:
-        print("Aviso ao ler páginas:", erro)
+        print("Aviso ao navegar nas páginas:", erro)
         
     browser.close()
 
-# Remover duplicados
+# Remover duplicados exatos
 vagas_unicas = []
 vistos = set()
 for vaga in vagas_reais:
@@ -111,4 +93,4 @@ if len(vagas_unicas) == 0:
 with open('vagas.json', 'w', encoding='utf-8') as f:
     json.dump(vagas_unicas, f, ensure_ascii=False, indent=4)
 
-print(f"Sucesso total! Extraídas {len(vagas_unicas)} vagas de todas as páginas.")
+print(f"Sucesso total! Extraídas {len(vagas_unicas)} vagas de todas as páginas combinadas.")
