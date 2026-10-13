@@ -6,7 +6,6 @@ from datetime import datetime
 agora = datetime.now().strftime("%d/%m/%Y às %H:%M")
 vagas_reais = []
 
-# Lista de segurança de locais para garantir que nunca falha
 locais_conhecidos = [
     "Lisboa", "Porto", "Braga", "Setúbal", "Aveiro", "Faro", "Coimbra", 
     "Leiria", "Santarém", "Viseu", "Viana do Castelo", "Vila Real", 
@@ -14,61 +13,86 @@ locais_conhecidos = [
     "Almada", "Entroncamento", "Pinhal Novo", "Nelas", "Santa Apolónia"
 ]
 
-print("A iniciar o Navegador Fantasma...")
+print("A iniciar o Navegador Fantasma com suporte a múltiplas páginas...")
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
     page = browser.new_page()
     
     try:
-        page.goto("https://recrutamento.infraestruturasdeportugal.pt/jobs", timeout=30000)
+        url_base = "https://recrutamento.infraestruturasdeportugal.pt/jobs"
+        page.goto(url_base, timeout=30000)
         page.wait_for_timeout(3000)
         
-        links = page.query_selector_all("a")
-        for link in links:
-            href = link.get_attribute("href")
-            texto = link.inner_text().strip()
+        pagina_atual = 1
+        max_paginas = 10 # Limite de segurança para evitar loops infinitos
+        
+        while pagina_atual <= max_paginas:
+            print(f"A ler a página {pagina_atual}...")
             
-            if href and "/jobs/" in href and len(texto) > 8:
-                if href != "/jobs" and href != "https://recrutamento.infraestruturasdeportugal.pt/jobs":
-                    
-                    link_final = href if not href.startswith('/') else "https://recrutamento.infraestruturasdeportugal.pt" + href
-                    texto_limpo = texto.split('\n')[0].strip()
-                    distrito_final = "Nacional / Vários"
-                    
-                    # O TRUQUE MÁGICO: Cortar pela sigla (M/F)
-                    if "(M/F)" in texto_limpo.upper():
-                        # Divide a frase em duas partes: antes e depois do (M/F)
-                        partes = re.split(r'\(M/F\)', texto_limpo, flags=re.IGNORECASE)
+            links = page.query_selector_all("a")
+            for link in links:
+                href = link.get_attribute("href")
+                texto = link.inner_text().strip()
+                
+                if href and "/jobs/" in href and len(texto) > 8:
+                    if href != "/jobs" and href != "https://recrutamento.infraestruturasdeportugal.pt/jobs":
                         
-                        if len(partes) > 1 and len(partes[1].strip()) > 2:
-                            # Apanha a morada, limpando os traços chatos e espaços
-                            distrito_final = partes[1].replace('-', '').replace('–', '').strip()
-                            # Reconstrói o título só com a profissão
-                            texto_limpo = partes[0].strip() + " (M/F)"
-                    else:
-                        # Se por acaso não tiver (M/F), tenta procurar pelas cidades na nossa lista
-                        for local in locais_conhecidos:
-                            if local.upper() in texto_limpo.upper():
-                                distrito_final = local
-                                break
+                        link_final = href if not href.startswith('/') else "https://recrutamento.infraestruturasdeportugal.pt" + href
+                        texto_limpo = texto.split('\n')[0].strip()
+                        distrito_final = "Nacional / Vários"
+                        
+                        if "(M/F)" in texto_limpo.upper():
+                            partes = re.split(r'\(M/F\)', texto_limpo, flags=re.IGNORECASE)
+                            if len(partes) > 1 and len(partes[1].strip()) > 2:
+                                distrito_final = partes[1].replace('-', '').replace('–', '').strip()
+                                texto_limpo = partes[0].strip() + " (M/F)"
+                        else:
+                            for local in locais_conhecidos:
+                                if local.upper() in texto_limpo.upper():
+                                    distrito_final = local
+                                    break
 
-                    # Prevenir que o distrito fique gigante caso algo corra mal
-                    if len(distrito_final) > 35:
-                        distrito_final = "Vários Locais"
-                    
-                    vagas_reais.append({
-                        "titulo": texto_limpo,
-                        "entidade": "Infraestruturas de Portugal",
-                        "distrito": distrito_final,
-                        "url": link_final
-                    })
+                        if len(distrito_final) > 35:
+                            distrito_final = "Vários Locais"
+                        
+                        vagas_reais.append({
+                            "titulo": texto_limpo,
+                            "entidade": "Infraestruturas de Portugal",
+                            "distrito": distrito_final,
+                            "url": link_final
+                        })
+            
+            # Tentar encontrar e clicar no botão "Seguinte" (próxima página)
+            try:
+                # Procura por botões comuns de paginação (setas ou texto de próxima página)
+                botao_seguinte = page.query_selector("a[rel='next'], .pagination-next a, li.pagination-next a, button.next")
+                if not botao_seguinte:
+                    # Alternativa: procurar links que contenham texto de avanço
+                    elementos_a = page.query_selector_all("a")
+                    for el in elementos_a:
+                        txt_el = el.inner_text().lower()
+                        if "seguinte" in txt_el or "»" in txt_el or ">" in txt_el:
+                            # Verifica se não é o mesmo botão já clicado
+                            botao_seguinte = el
+                            break
+                
+                if botao_seguinte and botao_seguinte.is_visible():
+                    botao_seguinte.click()
+                    page.wait_for_timeout(3000)
+                    pagina_atual += 1
+                else:
+                    # Se não houver botão seguinte, terminamos a paginação
+                    break
+            except Exception:
+                break
+                
     except Exception as erro:
-        print("Aviso ao ler vagas:", erro)
+        print("Aviso ao ler páginas:", erro)
         
     browser.close()
 
-# Remover repetidos
+# Remover duplicados
 vagas_unicas = []
 vistos = set()
 for vaga in vagas_reais:
@@ -87,4 +111,4 @@ if len(vagas_unicas) == 0:
 with open('vagas.json', 'w', encoding='utf-8') as f:
     json.dump(vagas_unicas, f, ensure_ascii=False, indent=4)
 
-print(f"Sucesso! Extraídas {len(vagas_unicas)} vagas.")
+print(f"Sucesso total! Extraídas {len(vagas_unicas)} vagas de todas as páginas.")
