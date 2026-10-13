@@ -1,43 +1,436 @@
 
-fetch('./vagas.json?v=' + Date.now())
-  .then(function (resposta) {
-    if (!resposta.ok) {
-      throw new Error('Erro HTTP ' + resposta.status);
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Consulta ofertas de emprego público em Portugal. Pesquisa vagas e filtra por distrito e entidade.">
+  <title>Empregos Públicos Portugal</title>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f4f6f8;
+      color: #263445;
+      line-height: 1.5;
     }
 
-    return resposta.json();
-  })
-  .then(function (dados) {
-    if (!Array.isArray(dados)) {
-      throw new Error(
-        'O ficheiro vagas.json não contém uma lista válida.'
-      );
+    header {
+      background: #153b5b;
+      color: white;
+      padding: 34px 20px;
+      text-align: center;
     }
 
-    todasAsVagas = dados;
-    mostrarVagas(todasAsVagas);
-  })
-  .catch(function (erro) {
-    console.error('Erro ao carregar as vagas:', erro);
+    header h1 {
+      margin: 0 0 8px;
+      font-size: clamp(26px, 4vw, 38px);
+    }
 
-    var lista = document.getElementById('lista');
+    header p {
+      margin: 0;
+      color: #e1ebf3;
+    }
 
-    if (lista) {
+    main {
+      max-width: 1100px;
+      margin: 28px auto;
+      padding: 0 16px;
+    }
+
+    .painel {
+      background: white;
+      padding: 22px;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px #142b3d12;
+      margin-bottom: 22px;
+    }
+
+    .filtros {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    label {
+      display: block;
+      font-weight: bold;
+      margin-bottom: 6px;
+    }
+
+    input, select {
+      width: 100%;
+      min-width: 0;
+      padding: 12px;
+      border: 1px solid #cbd5df;
+      border-radius: 7px;
+      font-size: 16px;
+      background: white;
+      color: #263445;
+    }
+
+    button {
+      cursor: pointer;
+      padding: 11px 16px;
+      border: 0;
+      border-radius: 7px;
+      background: #153b5b;
+      color: white;
+      font-size: 15px;
+    }
+
+    button:hover { background: #245779; }
+
+    .acoes {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+
+    #contador {
+      font-weight: bold;
+      color: #34495e;
+    }
+
+    .vaga {
+      background: white;
+      border: 1px solid #e1e7ed;
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 14px;
+      box-shadow: 0 2px 6px #142b3d08;
+    }
+
+    .vaga h2 {
+      font-size: 19px;
+      margin: 0 0 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .vaga h2 a {
+      color: #155c8a;
+      text-decoration: none;
+    }
+
+    .vaga h2 a:hover { text-decoration: underline; }
+
+    .detalhes {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .etiqueta {
+      display: inline-block;
+      background: #edf3f8;
+      color: #34495e;
+      padding: 5px 9px;
+      border-radius: 5px;
+      font-size: 13px;
+    }
+
+    .abrir {
+      display: inline-block;
+      background: #176b48;
+      color: white;
+      padding: 9px 13px;
+      border-radius: 6px;
+      text-decoration: none;
+      font-weight: bold;
+    }
+
+    .abrir:hover { background: #105437; }
+
+    .estado {
+      text-align: center;
+      padding: 24px;
+      background: white;
+      border-radius: 10px;
+      overflow-wrap: anywhere;
+    }
+
+    .nota {
+      font-size: 13px;
+      color: #617182;
+      margin-top: 22px;
+      text-align: center;
+    }
+
+    footer {
+      text-align: center;
+      padding: 24px;
+      color: #617182;
+      font-size: 13px;
+    }
+
+    @media (max-width: 700px) {
+      .filtros { grid-template-columns: 1fr; }
+      header { padding: 26px 16px; }
+      .painel { padding: 16px; }
+      .vaga { padding: 16px; }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>Empregos Públicos Portugal</h1>
+    <p>Encontra oportunidades de emprego no setor público e nas entidades participantes.</p>
+  </header>
+
+  <main>
+    <section class="painel" aria-label="Pesquisar e filtrar vagas">
+      <div class="filtros">
+        <div>
+          <label for="pesquisa">Pesquisar vagas</label>
+          <input id="pesquisa" type="search"
+            placeholder="Cargo, palavra-chave ou entidade">
+        </div>
+
+        <div>
+          <label for="distrito">Distrito ou região</label>
+          <select id="distrito">
+            <option value="">Todos os distritos</option>
+            <option> Aveiro </option>
+            <option> Beja </option>
+            <option> Braga </option>
+            <option> Bragança </option>
+            <option> Castelo Branco </option>
+            <option> Coimbra </option>
+            <option> Évora </option>
+            <option> Faro </option>
+            <option> Guarda </option>
+            <option> Leiria </option>
+            <option> Lisboa </option>
+            <option> Portalegre </option>
+            <option> Porto </option>
+            <option> Santarém </option>
+            <option> Setúbal </option>
+            <option> Viana do Castelo </option>
+            <option> Vila Real </option>
+            <option> Viseu </option>
+            <option> Região Autónoma dos Açores </option>
+            <option> Região Autónoma da Madeira </option>
+            <option> Nacional / Vários </option>
+          </select>
+        </div>
+
+        <div>
+          <label for="entidade">Entidade</label>
+          <select id="entidade">
+            <option value="">Todas as entidades</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="acoes">
+        <span id="contador" aria-live="polite">A carregar vagas…</span>
+        <button id="limpar" type="button">Limpar filtros</button>
+      </div>
+    </section>
+
+    <section id="lista" aria-live="polite">
+      <div class="estado">A carregar as ofertas de emprego…</div>
+    </section>
+
+    <p class="nota">
+      Confirma sempre os requisitos, os prazos e as condições no anúncio oficial.
+      A disponibilidade das ofertas depende das entidades que as publicam.
+    </p>
+  </main>
+
+  <footer>
+    Empregos Públicos Portugal
+  </footer>
+
+  <script>
+    let todasAsVagas = [];
+
+    const lista = document.getElementById('lista');
+    const pesquisa = document.getElementById('pesquisa');
+    const distrito = document.getElementById('distrito');
+    const entidade = document.getElementById('entidade');
+    const contador = document.getElementById('contador');
+
+    function texto(valor) {
+      return String(valor == null ? '' : valor).trim();
+    }
+
+    function normalizar(valor) {
+      return texto(valor)
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+    }
+
+    function obterDistrito(vaga) {
+      return texto(vaga.distrito || vaga.distritos || vaga.localizacao || vaga.localização || 'Nacional / Vários');
+    }
+
+    function preencherEntidades() {
+      const selecionada = entidade.value;
+
+      const entidades = [...new Set(
+        todasAsVagas.map(v => texto(v.entidade || v.organismo)).filter(Boolean)
+      )].sort((a, b) => a.localeCompare(b, 'pt-PT'));
+
+      entidade.innerHTML = '<option value="">Todas as entidades</option>';
+
+      entidades.forEach(nome => {
+        const opcao = document.createElement('option');
+        opcao.value = nome;
+        opcao.textContent = nome;
+        entidade.appendChild(opcao);
+      });
+
+      if (entidades.includes(selecionada)) {
+        entidade.value = selecionada;
+      }
+    }
+
+    function mostrarVagas(vagas) {
+      const termo = normalizar(pesquisa.value);
+      const distritoEscolhido = normalizar(distrito.value);
+      const entidadeEscolhida = normalizar(entidade.value);
+
+      const filtradas = vagas.filter(vaga => {
+        const titulo = texto(vaga.titulo || vaga.title || vaga.nome);
+        const nomeEntidade = texto(vaga.entidade || vaga.organismo);
+        const local = obterDistrito(vaga);
+        const descricao = texto(vaga.descricao || vaga.description);
+
+        const correspondePesquisa = !termo ||
+          normalizar(titulo + ' ' + nomeEntidade + ' ' + local + ' ' + descricao).includes(termo);
+
+        const correspondeDistrito = !distritoEscolhido ||
+          normalizar(local).includes(distritoEscolhido) ||
+          (distritoEscolhido !== normalizar('Nacional / Vários') &&
+           normalizar(local).includes('nacional'));
+
+        const correspondeEntidade = !entidadeEscolhida ||
+          normalizar(nomeEntidade) === entidadeEscolhida;
+
+        return correspondePesquisa && correspondeDistrito && correspondeEntidade;
+      });
+
+      contador.textContent = filtradas.length +
+        (filtradas.length === 1 ? ' vaga encontrada' : ' vagas encontradas');
+
       lista.innerHTML = '';
 
-      var mensagem = document.createElement('p');
-      mensagem.style.textAlign = 'center';
-      mensagem.textContent =
-        'Não foi possível carregar as vagas. Tenta novamente mais tarde. ';
+      if (filtradas.length === 0) {
+        lista.innerHTML = '<div class="estado">Não foram encontradas vagas com estes filtros.</div>';
+        return;
+      }
 
-      var link = document.createElement('a');
-      link.href =
-        'https://recrutamento.infraestruturasdeportugal.pt/jobs/';
-      link.textContent = 'Consultar as vagas oficiais da IP';
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
+      filtradas.forEach(vaga => {
+        const titulo = texto(vaga.titulo || vaga.title || vaga.nome) || 'Oferta de emprego';
+        const nomeEntidade = texto(vaga.entidade || vaga.organismo) || 'Entidade não indicada';
+        const local = obterDistrito(vaga);
+        const url = texto(vaga.url || vaga.link);
+        const descricao = texto(vaga.descricao || vaga.description);
 
-      mensagem.appendChild(link);
-      lista.appendChild(mensagem);
+        const cartao = document.createElement('article');
+        cartao.className = 'vaga';
+
+        const tituloElemento = document.createElement('h2');
+
+        if (url && /^https?:\/\//i.test(url)) {
+          const a = document.createElement('a');
+          a.href = url;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.textContent = titulo;
+          tituloElemento.appendChild(a);
+        } else {
+          tituloElemento.textContent = titulo;
+        }
+
+        const detalhes = document.createElement('div');
+        detalhes.className = 'detalhes';
+
+        [nomeEntidade, local].forEach(valor => {
+          const etiqueta = document.createElement('span');
+          etiqueta.className = 'etiqueta';
+          etiqueta.textContent = valor;
+          detalhes.appendChild(etiqueta);
+        });
+
+        cartao.appendChild(tituloElemento);
+        cartao.appendChild(detalhes);
+
+        if (descricao) {
+          const resumo = document.createElement('p');
+          resumo.textContent = descricao;
+          cartao.appendChild(resumo);
+        }
+
+        if (url && /^https?:\/\//i.test(url)) {
+          const link = document.createElement('a');
+          link.className = 'abrir';
+          link.href = url;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.textContent = 'Consultar oferta';
+          cartao.appendChild(link);
+        }
+
+        lista.appendChild(cartao);
+      });
     }
-  });
+
+    pesquisa.addEventListener('input', () => mostrarVagas(todasAsVagas));
+    distrito.addEventListener('change', () => mostrarVagas(todasAsVagas));
+    entidade.addEventListener('change', () => mostrarVagas(todasAsVagas));
+
+    document.getElementById('limpar').addEventListener('click', () => {
+      pesquisa.value = '';
+      distrito.value = '';
+      entidade.value = '';
+      mostrarVagas(todasAsVagas);
+    });
+
+    fetch('./vagas.json?v=' + Date.now())
+      .then(resposta => {
+        if (!resposta.ok) {
+          throw new Error('Erro HTTP ' + resposta.status);
+        }
+        return resposta.json();
+      })
+      .then(dados => {
+        if (!Array.isArray(dados)) {
+          throw new Error('O ficheiro vagas.json não contém uma lista válida.');
+        }
+
+        todasAsVagas = dados;
+        preencherEntidades();
+        mostrarVagas(todasAsVagas);
+      })
+      .catch(erro => {
+        console.error('Erro ao carregar as vagas:', erro);
+        contador.textContent = 'Não foi possível carregar as vagas.';
+        lista.innerHTML = '';
+
+        const mensagem = document.createElement('div');
+        mensagem.className = 'estado';
+        mensagem.textContent = 'Não foi possível carregar as vagas. Tenta novamente mais tarde. ';
+
+        const link = document.createElement('a');
+        link.href = 'https://recrutamento.infraestruturasdeportugal.pt/jobs/';
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = 'Consultar as vagas oficiais da IP';
+
+        mensagem.appendChild(link);
+        lista.appendChild(mensagem);
+      });
+  </script>
+</body>
+</html>
