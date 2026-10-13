@@ -92,6 +92,61 @@ LOCALIDADES_DISTRITOS = {
     "ponta delgada": "Açores",
     "açores": "Açores",
     "acores": "Açores",
+
+    # Localidades adicionais frequentes nos anúncios
+    "almada": "Setúbal",
+    "seixal": "Setúbal",
+    "sesimbra": "Setúbal",
+    "sines": "Setúbal",
+    "montijo": "Setúbal",
+    "moita": "Setúbal",
+    "alcochete": "Setúbal",
+    "palmela": "Setúbal",
+    "setubal": "Setúbal",
+    "setúbal": "Setúbal",
+    "pinhal novo": "Setúbal",
+    "caldas da rainha": "Leiria",
+    "peniche": "Leiria",
+    "óbidos": "Leiria",
+    "obidos": "Leiria",
+    "torres vedras": "Lisboa",
+    "mafra": "Lisboa",
+    "loures": "Lisboa",
+    "vila franca de xira": "Lisboa",
+    "alverca": "Lisboa",
+    "alhandra": "Lisboa",
+    "santarém": "Santarém",
+    "santarem": "Santarém",
+    "abrantes": "Santarém",
+    "torres novas": "Santarém",
+    "castelo branco": "Castelo Branco",
+    "fundão": "Castelo Branco",
+    "fundao": "Castelo Branco",
+    "guimarães": "Braga",
+    "guimaraes": "Braga",
+    "famalicão": "Braga",
+    "famalicao": "Braga",
+    "vila nova de famalicão": "Braga",
+    "vila nova de famalicao": "Braga",
+    "chaves": "Vila Real",
+    "peso da régua": "Vila Real",
+    "peso da regua": "Vila Real",
+    "mirandela": "Bragança",
+    "ovar": "Aveiro",
+    "ílhavo": "Aveiro",
+    "ilhavo": "Aveiro",
+    "viseu": "Viseu",
+    "lamego": "Viseu",
+    "covilhã": "Castelo Branco",
+    "covilha": "Castelo Branco",
+    "serpa": "Beja",
+    "mour a": "Beja",
+    "mourão": "Évora",
+    "moura": "Beja",
+    "elvas": "Portalegre",
+    "portalegre": "Portalegre",
+    "santiago do cacém": "Setúbal",
+    "santiago do cacem": "Setúbal",
 }
 
 
@@ -189,7 +244,12 @@ def adicionar_vaga(vagas, vaga):
 # ============================================================
 
 def recolher_vagas_ip(page):
+    """
+    Recolhe dinamicamente os anúncios da IP e visita cada anúncio
+    para tentar identificar a localização e o(s) distrito(s).
+    """
     vagas = {}
+    anuncios = {}
 
     print("IP: a abrir a lista de ofertas...")
 
@@ -198,49 +258,27 @@ def recolher_vagas_ip(page):
         wait_until="domcontentloaded",
         timeout=60000,
     )
-
-    page.wait_for_selector(
-        "a[href*='/jobs/']",
-        timeout=30000,
-    )
+    page.wait_for_selector("a[href*='/jobs/']", timeout=30000)
 
     links_paginacao = page.locator(
         "a[href*='page=']"
-    ).evaluate_all(
-        "(els) => els.map(a => a.href)"
-    )
+    ).evaluate_all("(els) => els.map(a => a.href)")
 
     paginas = [
         int(m.group(1))
         for link in links_paginacao
-        if (
-            m := re.search(r"[?&]page=(\d+)", link)
-        )
+        if (m := re.search(r"[?&]page=(\\d+)", link))
     ]
-
     ultima_pagina = max(paginas, default=1)
 
-    # Percorrer as páginas descobertas no portal.
-    # Não parar só porque uma página não contém resultados.
     for numero in range(1, ultima_pagina + 1):
         url = f"{URL_LISTA_IP}?page={numero}"
-
         print(f"IP: página {numero}/{ultima_pagina}")
 
-        page.goto(
-            url,
-            wait_until="domcontentloaded",
-            timeout=60000,
-        )
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_selector("a[href*='/jobs/']", timeout=30000)
 
-        page.wait_for_selector(
-            "a[href*='/jobs/']",
-            timeout=30000,
-        )
-
-        elementos = page.locator(
-            "a[href*='/jobs/']"
-        ).evaluate_all("""
+        elementos = page.locator("a[href*='/jobs/']").evaluate_all("""
             els => els.map(a => ({
                 titulo: a.innerText.trim(),
                 url: a.href
@@ -249,37 +287,66 @@ def recolher_vagas_ip(page):
 
         for item in elementos:
             titulo = item["titulo"].splitlines()[0].strip()
-            link = item["url"]
+            link = normalizar_url(item["url"])
 
-            if not titulo:
+            if not titulo or "/jobs/" not in urlparse(link).path:
                 continue
-
-            if "/jobs/" not in urlparse(link).path:
+            if titulo.casefold() in {"anterior", "próxima", "proxima", "seguinte"}:
                 continue
-
-            if titulo.casefold() in {
-                "anterior",
-                "próxima",
-                "proxima",
-                "seguinte",
-            }:
-                continue
-
             if "page=" in link or "tag=" in link:
                 continue
 
+            anuncios.setdefault(link, titulo)
+
+    print(f"IP: {len(anuncios)} anúncios únicos encontrados.")
+
+    for url, titulo_lista in anuncios.items():
+        print(f"IP: a analisar {titulo_lista}")
+
+        titulo = titulo_lista
+        texto_pagina = ""
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(300)
+            texto_pagina = page.locator("body").inner_text()
+
+            if page.locator("h1").count() > 0:
+                titulo_pagina = page.locator("h1").first.inner_text().strip()
+                if titulo_pagina:
+                    titulo = titulo_pagina
+        except Exception as erro:
+            print(f"IP: não foi possível ler os detalhes de {url}: {erro}")
+
+        # Dar prioridade a linhas explicitamente identificadas como local.
+        localizacao = extrair_localizacoes(texto_pagina)
+        texto_para_identificar = " | ".join(
+            parte for parte in [titulo, localizacao] if parte
+        )
+
+        # Se os campos explícitos não forem suficientes, analisar o título
+        # e o texto da página, que frequentemente indicam cidade/distrito.
+        distritos = identificar_distritos(texto_para_identificar)
+        if not distritos:
+            distritos = identificar_distritos(titulo)
+        if not distritos:
+            distritos = identificar_distritos(texto_pagina)
+
+        if not distritos:
+            distritos = ["Nacional / Vários"]
+
+        for nome_distrito in distritos:
             adicionar_vaga(
                 vagas,
                 {
                     "titulo": titulo,
                     "entidade": "Infraestruturas de Portugal",
-                    "distrito": "Nacional / Vários",
-                    "url": link,
+                    "distrito": nome_distrito,
+                    "local": localizacao or titulo_lista,
+                    "url": url,
                 },
             )
 
-    print(f"IP: {len(vagas)} registos recolhidos.")
-
+    print(f"IP: {len(vagas)} registos por distrito recolhidos.")
     return list(vagas.values())
 
 
