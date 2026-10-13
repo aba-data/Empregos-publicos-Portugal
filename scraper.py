@@ -66,7 +66,7 @@ with sync_playwright() as p:
             
             # Se uma página não trouxer nenhuma vaga nova, significa que chegámos ao fim
             if vagas_nesta_pagina == 0 and numero_pagina > 1:
-                print( ગૃહ(f"Página {numero_pagina} vazia. Fim da recolha.")
+                print(f"Página {numero_pagina} vazia. Fim da recolha.")
                 break
                 
     except Exception as erro:
