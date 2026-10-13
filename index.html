@@ -9,11 +9,11 @@
         .cabecalho { text-align: center; margin-bottom: 30px; }
         .cabecalho h1 { color: #1d4ed8; }
         .filtros { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap; }
-        input, select { padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 16px; min-width: 200px; }
+        input, select { padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 16px; min-width: 200px; background: white; }
         .grelha-vagas { display: grid; gap: 15px; max-width: 900px; margin: 0 auto; }
         .vaga-cartao { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left: 4px solid #1d4ed8; }
         .vaga-cartao h3 { margin: 0 0 10px 0; color: #111827; }
-        .tags { display: flex; gap: 10px; margin-bottom: 15px; font-size: 14px; color: #4b5563; }
+        .tags { display: flex; gap: 10px; margin-bottom: 15px; font-size: 14px; color: #4b5563; flex-wrap: wrap; }
         .tag { background: #e5e7eb; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
         .btn { display: inline-block; background: #1d4ed8; color: white; text-decoration: none; padding: 8px 16px; border-radius: 6px; font-weight: bold; }
         .btn:hover { background: #1e40af; }
@@ -23,15 +23,28 @@
 
     <div class="cabecalho">
         <h1>Vagas Públicas & Estado</h1>
-        <p>Atualizado automaticamente pelo nosso Robô</p>
+        <p>Portal Oficial de Recrutamento Automatizado</p>
     </div>
 
     <div class="filtros">
-        <input type="text" id="filtro-nome" placeholder="Pesquisar por vaga..." onkeyup="filtrarVagas()">
+        <input type="text" id="filtro-nome" placeholder="Pesquisar por cargo..." onkeyup="filtrarVagas()">
+        
         <select id="filtro-entidade" onchange="filtrarVagas()">
             <option value="">Todas as Entidades</option>
             <option value="Infraestruturas de Portugal">Infraestruturas de Portugal</option>
-            <option value="Comboios de Portugal (CP)">Comboios de Portugal (CP)</option>
+        </select>
+
+        <select id="filtro-distrito" onchange="filtrarVagas()">
+            <option value="">Todos os Distritos / Locais</option>
+            <option value="Lisboa">Lisboa</option>
+            <option value="Porto">Porto</option>
+            <option value="Almada">Almada</option>
+            <option value="Coimbra">Coimbra</option>
+            <option value="Faro">Faro</option>
+            <option value="Braga">Braga</option>
+            <option value="Setúbal">Setúbal</option>
+            <option value="Aveiro">Aveiro</option>
+            <option value="Nacional">Nacional / Vários</option>
         </select>
     </div>
 
@@ -42,8 +55,7 @@
     <script>
         let todasAsVagas = [];
 
-        // Esta função vai ao ficheiro vagas.json (alimentado pelo robô) buscar os dados
-        fetch('vagas.json')
+        fetch('vagas.json?v=' + new Date().getTime())
             .then(resposta => resposta.json())
             .then(dados => {
                 todasAsVagas = dados;
@@ -55,7 +67,7 @@
             lista.innerHTML = '';
             
             if (vagas.length === 0) {
-                lista.innerHTML = '<p style="text-align:center;">Nenhuma vaga encontrada.</p>';
+                lista.innerHTML = '<p style="text-align:center;">Nenhuma vaga corresponde aos critérios selecionados.</p>';
                 return;
             }
 
@@ -67,7 +79,7 @@
                             <span class="tag">🏢 ${vaga.entidade}</span>
                             <span class="tag">📍 ${vaga.distrito}</span>
                         </div>
-                        <a href="${vaga.url}" target="_blank" class="btn">Ver Detalhes</a>
+                        <a href="${vaga.url}" target="_blank" class="btn">Ver Detalhes e Candidatar</a>
                     </div>
                 `;
             });
@@ -76,11 +88,14 @@
         function filtrarVagas() {
             const texto = document.getElementById('filtro-nome').value.toLowerCase();
             const entidade = document.getElementById('filtro-entidade').value;
+            const distrito = document.getElementById('filtro-distrito').value.toLowerCase();
 
             const vagasFiltradas = todasAsVagas.filter(vaga => {
                 const bateCertoTexto = vaga.titulo.toLowerCase().includes(texto);
                 const bateCertoEntidade = entidade === "" || vaga.entidade === entidade;
-                return bateCertoTexto && bateCertoEntidade;
+                const bateCertoDistrito = distrito === "" || vaga.distrito.toLowerCase().includes(distrito);
+                
+                return bateCertoTexto && bateCertoEntidade && bateCertoDistrito;
             });
 
             mostrarVagas(vagasFiltradas);
