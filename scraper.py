@@ -13,25 +13,31 @@ locais_conhecidos = [
     "Almada", "Entroncamento", "Pinhal Novo", "Nelas", "Zona Sul", "Santa Apolónia"
 ]
 
-print("A iniciar o Navegador Fantasma no portal oficial de recrutamento (até 20 páginas)...")
+print("A iniciar o Navegador Fantasma com carregamento por scroll total...")
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
     page = browser.new_page()
     
     try:
-        # Varredura profunda pelas páginas do portal de recrutamento real
-        for num_pag in range(1, 21):
-            url_pagina = f"https://recrutamento.infraestruturasdeportugal.pt/jobs?page={num_pag}"
-            print(f"A visitar: {url_pagina}")
-            
-            page.goto(url_pagina, timeout=30000)
-            page.wait_for_timeout(3000)
-            
-            elementos = page.query_selector_all("a[href*='/jobs/']")
-            vagas_encontradas_nesta_pagina = 0
-            
-            for el in elementos:
+        url_base = "https://recrutamento.infraestruturasdeportugal.pt/jobs"
+        print(f"A aceder a {url_base}...")
+        
+        page.goto(url_base, timeout=30000)
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(3000)
+        
+        # Simular vários 'scrolls' para baixo para forçar o carregamento de todas as vagas na página
+        for i in range(8):
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(2000)
+            print(f"A descer a página (tentativa {i+1})...")
+        
+        elementos = page.query_selector_all("a[href*='/jobs/']")
+        print(f"Total de links brutos encontrados: {len(elementos)}")
+        
+        for el in elementos:
+            try:
                 href = el.get_attribute("href")
                 texto = el.inner_text().strip()
                 
@@ -72,12 +78,8 @@ with sync_playwright() as p:
                             "distrito": distrito,
                             "url": link_final
                         })
-                        vagas_encontradas_nesta_pagina += 1
-            
-            # Se uma página acima da 1 não trouxer vagas, o site esgotou-se
-            if vagas_encontradas_nesta_pagina == 0 and num_pag > 1:
-                print(f"Página {num_pag} vazia. Fim da recolha.")
-                break
+            except Exception as e:
+                continue
                 
     except Exception as erro:
         print("Erro ao processar o portal:", erro)
@@ -103,4 +105,4 @@ if len(vagas_unicas) == 0:
 with open('vagas.json', 'w', encoding='utf-8') as f:
     json.dump(vagas_unicas, f, ensure_ascii=False, indent=4)
 
-print(f"Sucesso! Extraídas {len(vagas_unicas)} vagas em profundidade.")
+print(f"Sucesso! Extraídas {len(vagas_unicas)} vagas via scroll.")
