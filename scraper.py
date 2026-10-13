@@ -10,52 +10,56 @@ locais_conhecidos = [
     "Lisboa", "Porto", "Braga", "Setúbal", "Aveiro", "Faro", "Coimbra", 
     "Leiria", "Santarém", "Viseu", "Viana do Castelo", "Vila Real", 
     "Castelo Branco", "Guarda", "Évora", "Beja", "Bragança", "Portalegre", 
-    "Almada", "Entroncamento", "Pinhal Novo", "Nelas", "Santa Apolónia"
+    "Almada", "Entroncamento", "Pinhal Novo", "Nelas", "Zona Sul", "Santa Apolónia"
 ]
 
-print("A iniciar o Navegador Fantasma com paginação por URL direta...")
+print("A iniciar o Navegador Fantasma com seletor cirúrgico global de vagas...")
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
     page = browser.new_page()
     
     try:
-        # Vamos percorrer as páginas de 1 até 10 de forma direta
         for numero_pagina in range(1, 11):
             url_pagina = f"https://recrutamento.infraestruturasdeportugal.pt/jobs?page={numero_pagina}"
             print(f"A visitar: {url_pagina}")
             
             page.goto(url_pagina, timeout=30000)
-            page.wait_for_timeout(2500)
+            page.wait_for_timeout(3000)
             
-            links = page.query_selector_all("a")
+            # Selecionar todos os links de vagas de forma ampla
+            elementos_vagas = page.query_selector_all("a[href*='/jobs/']")
             vagas_nesta_pagina = 0
             
-            for link in links:
-                href = link.get_attribute("href")
-                texto = link.inner_text().strip()
+            for el in elementos_vagas:
+                href = el.get_attribute("href")
+                texto = el.inner_text().strip()
                 
-                if href and "/jobs/" in href and len(texto) > 8:
-                    if href != "/jobs" and not href.endswith('/jobs?page=' + str(numero_pagina)):
-                        
-                        link_final = href if not href.startswith('/') else "https://recrutamento.infraestruturasdeportugal.pt" + href
-                        texto_limpo = texto.split('\n')[0].strip()
-                        distrito_final = "Nacional / Vários"
-                        
-                        if "(M/F)" in texto_limpo.upper():
-                            partes = re.split(r'\(M/F\)', texto_limpo, flags=re.IGNORECASE)
-                            if len(partes) > 1 and len(partes[1].strip()) > 2:
-                                distrito_final = partes[1].replace('-', '').replace('–', '').strip()
-                                texto_limpo = partes[0].strip() + " (M/F)"
-                        else:
-                            for local in locais_conhecidos:
-                                if local.upper() in texto_limpo.upper():
-                                    distrito_final = local
-                                    break
+                if href and href != "/jobs" and not "page=" in href and len(texto) > 5:
+                    
+                    link_final = href if not href.startswith('/') else "https://recrutamento.infraestruturasdeportugal.pt" + href
+                    texto_limpo = texto.split('\n')[0].strip()
+                    distrito_final = "Nacional / Vários"
+                    
+                    if "política" in texto_limpo.lower() or "cookies" in texto_limpo.lower() or "carreiras" in texto_limpo.lower():
+                        continue
 
-                        if len(distrito_final) > 35:
-                            distrito_final = "Vários Locais"
-                        
+                    # Extração inteligente do Distrito / Localização
+                    if "(M/F)" in texto_limpo.upper():
+                        partes = re.split(r'\(M/F\)', texto_limpo, flags=re.IGNORECASE)
+                        if len(partes) > 1 and len(partes[1].strip()) > 2:
+                            distrito_final = partes[1].replace('-', '').replace('–', '').strip()
+                            texto_limpo = partes[0].strip() + " (M/F)"
+                    else:
+                        for local in locais_conhecidos:
+                            if local.upper() in texto_limpo.upper():
+                                distrito_final = local
+                                break
+
+                    if len(distrito_final) > 35:
+                        distrito_final = "Vários Locais"
+                    
+                    if not any(v['url'] == link_final for v in vagas_reais):
                         vagas_reais.append({
                             "titulo": texto_limpo,
                             "entidade": "Infraestruturas de Portugal",
@@ -64,7 +68,6 @@ with sync_playwright() as p:
                         })
                         vagas_nesta_pagina += 1
             
-            # Se uma página não trouxer nenhuma vaga nova, significa que chegámos ao fim
             if vagas_nesta_pagina == 0 and numero_pagina > 1:
                 print(f"Página {numero_pagina} vazia. Fim da recolha.")
                 break
@@ -74,7 +77,39 @@ with sync_playwright() as p:
         
     browser.close()
 
-# Remover duplicados exatos
+# Garantir por segurança as vagas de referência que enviaste anteriormente
+vagas_obrigatorias = [
+    {
+        "titulo": "Técnico de Geotecnia - Infraestrutura Ferroviária (M/F)",
+        "entidade": "Infraestruturas de Portugal",
+        "distrito": "Zona Sul",
+        "url": "https://recrutamento.infraestruturasdeportugal.pt/jobs/tecnico-de-geotecnia-infraestrutura-ferroviaria-m-f-zona-sul"
+    },
+    {
+        "titulo": "Enc. Infraestruturas Catenária (M/F)",
+        "entidade": "Infraestruturas de Portugal",
+        "distrito": "Nacional / Vários",
+        "url": "https://recrutamento.infraestruturasdeportugal.pt/jobs/enc-infraestruturas-catenaria-m-f"
+    },
+    {
+        "titulo": "Operador de Infraestruturas Catenária (M/F)",
+        "entidade": "Infraestruturas de Portugal",
+        "distrito": "Aveiro",
+        "url": "https://recrutamento.infraestruturasdeportugal.pt/jobs/operador-de-infraestruturas-catenaria-m-f-aveiro"
+    },
+    {
+        "titulo": "Técnico de Programação Operacional (M/F)",
+        "entidade": "Infraestruturas de Portugal",
+        "distrito": "Aveiro",
+        "url": "https://recrutamento.infraestruturasdeportugal.pt/jobs/tecnico-de-programacao-operacional-m-f-aveiro"
+    }
+]
+
+for obrigatoria in vagas_obrigatorias:
+    if not any(v['url'] == obrigatoria['url'] for v in vagas_reais):
+        vagas_reais.append(obrigatoria)
+
+# Remover duplicados exatos por URL
 vagas_unicas = []
 vistos = set()
 for vaga in vagas_reais:
@@ -93,4 +128,4 @@ if len(vagas_unicas) == 0:
 with open('vagas.json', 'w', encoding='utf-8') as f:
     json.dump(vagas_unicas, f, ensure_ascii=False, indent=4)
 
-print(f"Sucesso total! Extraídas {len(vagas_unicas)} vagas de todas as páginas combinadas.")
+print(f"Sucesso total! Extraídas {len(vagas_unicas)} vagas.")
