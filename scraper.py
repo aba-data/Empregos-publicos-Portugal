@@ -6,14 +6,16 @@ from datetime import datetime
 agora = datetime.now().strftime("%d/%m/%Y às %H:%M")
 vagas_reais = []
 
+# Lista exaustiva de TODOS os distritos de Portugal e principais regiões operacionais
 locais_conhecidos = [
     "Lisboa", "Porto", "Braga", "Setúbal", "Aveiro", "Faro", "Coimbra", 
     "Leiria", "Santarém", "Viseu", "Viana do Castelo", "Vila Real", 
-    "Castelo Branco", "Guarda", "Évora", "Beja", "Bragança", "Portalegre", 
-    "Almada", "Entroncamento", "Pinhal Novo", "Nelas", "Zona Sul", "Santa Apolónia"
+    "Castelo Branco", "Guarda", "Évora", "Beja", "Bragança", "Portalegre",
+    "Almada", "Entroncamento", "Pinhal Novo", "Nelas", "Zona Sul", "Zona Norte", 
+    "Zona Centro", "Santa Apolónia", "Campanhã", "Alentejo", "Algarve"
 ]
 
-print("A iniciar o Navegador Fantasma com carregamento por scroll total...")
+print("A iniciar o Navegador Fantasma com cobertura total de distritos...")
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
@@ -27,11 +29,10 @@ with sync_playwright() as p:
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(3000)
         
-        # Simular vários 'scrolls' para baixo para forçar o carregamento de todas as vagas na página
+        # Descer a página para carregar todos os elementos dinâmicos
         for i in range(8):
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            page.wait_for_timeout(2000)
-            print(f"A descer a página (tentativa {i+1})...")
+            page.wait_for_timeout(1500)
         
         elementos = page.query_selector_all("a[href*='/jobs/']")
         print(f"Total de links brutos encontrados: {len(elementos)}")
@@ -60,7 +61,8 @@ with sync_playwright() as p:
                         
                         locais_encontrados = []
                         for loc in locais_conhecidos:
-                            if loc.lower() in texto_completo.lower():
+                            # Procura insensível a maiúsculas/minúsculas por cada distrito na string completa
+                            if re.search(r'\b' + re.escape(loc) + r'\b', texto_completo, re.IGNORECASE):
                                 locais_encontrados.append(loc)
                         
                         if locais_encontrados:
@@ -105,4 +107,4 @@ if len(vagas_unicas) == 0:
 with open('vagas.json', 'w', encoding='utf-8') as f:
     json.dump(vagas_unicas, f, ensure_ascii=False, indent=4)
 
-print(f"Sucesso! Extraídas {len(vagas_unicas)} vagas via scroll.")
+print(f"Sucesso! Extraídas {len(vagas_unicas)} vagas com cobertura nacional total.")
