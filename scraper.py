@@ -267,7 +267,7 @@ def recolher_vagas_ip(page):
     paginas = [
         int(m.group(1))
         for link in links_paginacao
-        if (m := re.search(r"[?&]page=(\\d+)", link))
+        if (m := re.search(r"[?&]page=(\d+)", link))
     ]
     ultima_pagina = max(paginas, default=1)
 
