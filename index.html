@@ -1,28 +1,43 @@
 
 fetch('./vagas.json?v=' + Date.now())
-  .then(resposta => {
+  .then(function (resposta) {
     if (!resposta.ok) {
-      throw new Error(`Erro HTTP ${resposta.status}`);
+      throw new Error('Erro HTTP ' + resposta.status);
     }
+
     return resposta.json();
   })
-  .then(dados => {
+  .then(function (dados) {
     if (!Array.isArray(dados)) {
-      throw new Error('O ficheiro de vagas não contém uma lista válida.');
+      throw new Error(
+        'O ficheiro vagas.json não contém uma lista válida.'
+      );
     }
 
     todasAsVagas = dados;
     mostrarVagas(todasAsVagas);
   })
-  .catch(erro => {
+  .catch(function (erro) {
     console.error('Erro ao carregar as vagas:', erro);
 
-    document.getElementById('lista').innerHTML = `
-      <p style="text-align:center;">
-        Não foi possível carregar as vagas.
-        <a href="https://recrutamento.infraestruturasdeportugal.pt/jobs/">
-          Consultar o portal oficial da IP
-        </a>
-      </p>
-    `;
+    var lista = document.getElementById('lista');
+
+    if (lista) {
+      lista.innerHTML = '';
+
+      var mensagem = document.createElement('p');
+      mensagem.style.textAlign = 'center';
+      mensagem.textContent =
+        'Não foi possível carregar as vagas. Tenta novamente mais tarde. ';
+
+      var link = document.createElement('a');
+      link.href =
+        'https://recrutamento.infraestruturasdeportugal.pt/jobs/';
+      link.textContent = 'Consultar as vagas oficiais da IP';
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+
+      mensagem.appendChild(link);
+      lista.appendChild(mensagem);
+    }
   });
