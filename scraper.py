@@ -1,6 +1,8 @@
 
 import json
 import re
+import unicodedata
+import urllib.request
 from urllib.parse import urljoin, urlparse, urlunparse
 from playwright.sync_api import sync_playwright
 
@@ -150,6 +152,46 @@ LOCALIDADES_DISTRITOS = {
 }
 
 
+# Mapa completo de municípios portugueses (inclui municípios fora do
+# mapeamento manual). É carregado uma vez por execução; se a fonte estiver
+# indisponível, o scraper continua a usar o mapeamento local abaixo.
+URL_MUNICIPIOS = "https://raw.githubusercontent.com/JoaoFOliveira/portuguese-municipalities/master/municipalities.json"
+
+
+def sem_acentos(valor):
+    valor = unicodedata.normalize("NFKD", valor or "")
+    return "".join(caracter for caracter in valor if not unicodedata.combining(caracter)).casefold()
+
+
+def carregar_municipios_portugal():
+    try:
+        pedido = urllib.request.Request(
+            URL_MUNICIPIOS,
+            headers={"User-Agent": "Empregos-publicos-Portugal/1.0"},
+        )
+        with urllib.request.urlopen(pedido, timeout=10) as resposta:
+            dados = json.loads(resposta.read().decode("utf-8"))
+
+        carregados = {}
+        if isinstance(dados, list):
+            for item in dados:
+                if not isinstance(item, dict):
+                    continue
+                nome = item.get("name") or item.get("municipality") or item.get("municipio")
+                distrito = item.get("district") or item.get("distrito")
+                if nome and distrito:
+                    carregados[sem_acentos(nome)] = distrito
+        if carregados:
+            print(f"Geografia: {len(carregados)} municípios carregados automaticamente.")
+            return carregados
+        print("Geografia: formato da lista de municípios não reconhecido; uso o mapa local.")
+    except Exception as erro:
+        print(f"Geografia: não foi possível atualizar a lista de municípios ({erro}); uso o mapa local.")
+    return {}
+
+
+MUNICIPIOS_PORTUGAL = carregar_municipios_portugal()
+
 # ============================================================
 # FUNÇÕES AUXILIARES
 # ============================================================
@@ -169,31 +211,24 @@ def normalizar_url(url):
 
 
 def identificar_distritos(texto):
-    """
-    Identifica os distritos através das localidades encontradas.
-    Devolve uma lista sem duplicados.
-    """
-    texto = (texto or "").casefold()
+    """Identifica distritos através de municípios e localidades mencionados."""
+    texto_normalizado = sem_acentos(texto)
     encontrados = []
 
-    # Procurar primeiro as expressões geográficas mais longas.
-    localidades = sorted(
-        LOCALIDADES_DISTRITOS.items(),
-        key=lambda item: len(item[0]),
-        reverse=True,
-    )
+    # Mapa dinâmico de municípios primeiro; depois, localidades/estações
+    # conhecidas no mapa local. Expressões longas têm prioridade para evitar
+    # correspondências parciais (por exemplo, Vila Real de Santo António).
+    localidades = {}
+    localidades.update(MUNICIPIOS_PORTUGAL)
+    localidades.update({sem_acentos(k): v for k, v in LOCALIDADES_DISTRITOS.items()})
 
-    for localidade, distrito in localidades:
-        padrao = (
-            r"(?<![a-záàâãéêíóôõúç])"
-            + re.escape(localidade)
-            + r"(?![a-záàâãéêíóôõúç])"
-        )
-
-        if re.search(padrao, texto):
+    for localidade, distrito in sorted(localidades.items(), key=lambda item: len(item[0]), reverse=True):
+        if not localidade:
+            continue
+        padrao = r"(?<![a-z0-9])" + re.escape(localidade) + r"(?![a-z0-9])"
+        if re.search(padrao, texto_normalizado):
             if distrito not in encontrados:
                 encontrados.append(distrito)
-
     return encontrados
 
 
