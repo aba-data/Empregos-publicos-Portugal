@@ -309,10 +309,12 @@
         const correspondePesquisa = !termo ||
           normalizar(titulo + ' ' + nomeEntidade + ' ' + local + ' ' + descricao).includes(termo);
 
-        const correspondeDistrito = !distritoEscolhido ||
-          normalizar(local).includes(distritoEscolhido) ||
-          (distritoEscolhido !== normalizar('Nacional / Vários') &&
-           normalizar(local).includes('nacional'));
+        const distritosDaVaga = normalizar(local)
+  .split('/')
+  .map(item => item.trim());
+
+const correspondeDistrito = !distritoEscolhido ||
+  distritosDaVaga.includes(distritoEscolhido);
 
         const correspondeEntidade = !entidadeEscolhida ||
           normalizar(nomeEntidade) === entidadeEscolhida;
