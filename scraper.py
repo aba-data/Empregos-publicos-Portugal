@@ -1,4 +1,3 @@
-
 import json
 import re
 import unicodedata
@@ -390,95 +389,83 @@ def recolher_vagas_ip(page):
 # ============================================================
 
 def recolher_vagas_cp(page):
+    """Recolhe ofertas da página oficial da CP e visita cada anúncio."""
     vagas = {}
-
     print("CP: a consultar ofertas disponíveis...")
 
-    page.goto(
-        URL_LISTA_CP,
-        wait_until="domcontentloaded",
-        timeout=60000,
-    )
+    page.goto(URL_LISTA_CP, wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(1500)
 
-    # Ler os links existentes na página oficial.
+    # A página pode apresentar os anúncios em cartões ou links institucionais.
+    # Recolhemos todos os links e filtramos apenas os de páginas de recrutamento.
     links = page.locator("a[href]").evaluate_all("""
         anchors => anchors.map(a => ({
-            titulo: a.innerText.trim(),
+            titulo: (a.innerText || a.textContent || '').trim(),
             url: a.href,
             contexto: (
                 a.closest('article')?.innerText ||
+                a.closest('li')?.innerText ||
                 a.parentElement?.parentElement?.innerText ||
-                a.innerText
+                a.innerText ||
+                ''
             ).trim()
         }))
     """)
 
     ofertas = {}
-
     for item in links:
-        link = normalizar_url(item["url"])
+        link = normalizar_url(item.get("url", ""))
         partes = urlparse(link)
+        host = (partes.hostname or "").lower()
 
-        # Aceitar apenas páginas de detalhe de ofertas
-        # institucionais da CP, não menus nem páginas genéricas.
-        if partes.hostname not in {
-            "www.cp.pt",
-            "cp.pt",
-        }:
+        if host not in {"cp.pt", "www.cp.pt", "www1.cp.pt", "www2.cp.pt"}:
             continue
 
-        if not re.fullmatch(
-            r"/info/w/institucional/[^/]+",
-            partes.path,
-            flags=re.IGNORECASE,
-        ):
+        caminho = partes.path.rstrip("/")
+        # O formato usado pela CP para anúncios de recrutamento é, por exemplo,
+        # /info/w/institucional/revisor-orv. Aceitar páginas desse tipo sem
+        # depender do nome específico da oferta.
+        if not re.fullmatch(r"/info/w/institucional/[^/]+", caminho, flags=re.I):
+            continue
+        if caminho.casefold().endswith("/ofertas-disponiveis"):
             continue
 
-        if link == normalizar_url(URL_LISTA_CP):
+        titulo_link = " ".join((item.get("titulo") or "").split())
+        contexto = item.get("contexto") or ""
+        # Evitar capturar links genéricos de navegação.
+        if not titulo_link and not contexto:
             continue
-
         ofertas[link] = {
             "url": link,
-            "titulo_lista": item["titulo"],
-            "contexto": item["contexto"],
+            "titulo_lista": titulo_link,
+            "contexto": contexto,
         }
 
-    if not ofertas:
-        raise RuntimeError(
-            "A CP não devolveu links de ofertas reconhecíveis. "
-            "Verificar a estrutura HTML do portal."
-        )
+    print(f"CP: {len(ofertas)} links candidatos encontrados na página.")
 
-    print(f"CP: {len(ofertas)} páginas de oferta descobertas.")
+    # Se a listagem não expuser os links dos anúncios, tenta descobrir anúncios
+    # a partir dos links de recrutamento que a página CP disponibiliza.
+    if not ofertas:
+        print("CP: não foram encontrados links de detalhe na listagem.")
+        print("CP: verificar no workflow se a página carregou os anúncios e os links.")
 
     for url, item in ofertas.items():
         print(f"CP: a analisar {url}")
-
         titulo = ""
         texto_pagina = ""
 
         try:
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000,
-            )
-
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(500)
-
             texto_pagina = page.locator("body").inner_text()
 
-            # O título principal costuma estar no h1.
             if page.locator("h1").count() > 0:
-                titulo = page.locator("h1").first.inner_text().strip()
+                titulo = " ".join(page.locator("h1").first.inner_text().split())
 
-            # Excluir títulos genéricos do portal.
             if not titulo or titulo.casefold() in {
-                "ofertas disponíveis",
-                "ofertas de emprego",
-                "empregos",
+                "ofertas disponíveis", "ofertas de emprego", "empregos", "ofertas de emprego"
             }:
-                titulo = item["titulo_lista"].strip()
+                titulo = item["titulo_lista"]
 
         except Exception as erro:
             print(f"CP: não foi possível ler {url}: {erro}")
@@ -488,34 +475,31 @@ def recolher_vagas_cp(page):
             print(f"CP: título não identificado em {url}")
             continue
 
-        # Primeiro, procurar a localização na página de detalhe.
+        # A localização pode surgir como "Local:", "Localizações:" ou em
+        # texto corrido, por exemplo "Lisboa-Rossio; Cais do Sodré; Faro".
         localizacao = extrair_localizacoes(texto_pagina)
-
-        # Alternativa: contexto do cartão na página de listagem.
         if not localizacao:
             localizacao = extrair_localizacoes(item["contexto"])
 
-        distritos = identificar_distritos(localizacao)
-
-        # Se não houver localização reconhecida, manter o anúncio,
-        # sem inventar um distrito.
+        texto_para_identificar = " | ".join(
+            parte for parte in [localizacao, titulo] if parte
+        )
+        distritos = identificar_distritos(texto_para_identificar)
+        if not distritos:
+            distritos = identificar_distritos(texto_pagina)
         if not distritos:
             distritos = ["Nacional / Vários"]
 
         for distrito in distritos:
-            adicionar_vaga(
-                vagas,
-                {
-                    "titulo": titulo,
-                    "entidade": "CP - Comboios de Portugal",
-                    "distrito": distrito,
-                    "local": localizacao or "Localização por confirmar",
-                    "url": url,
-                },
-            )
+            adicionar_vaga(vagas, {
+                "titulo": titulo,
+                "entidade": "CP - Comboios de Portugal",
+                "distrito": distrito,
+                "local": localizacao or "Localização por confirmar",
+                "url": url,
+            })
 
-    print(f"CP: {len(vagas)} registos por distrito.")
-
+    print(f"CP: {len(vagas)} registos por distrito recolhidos.")
     return list(vagas.values())
 
 
