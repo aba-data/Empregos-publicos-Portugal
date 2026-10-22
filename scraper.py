@@ -1,4 +1,3 @@
-
 import json
 import re
 import unicodedata
@@ -14,6 +13,7 @@ BASE_IP = "https://recrutamento.infraestruturasdeportugal.pt"
 URL_LISTA_IP = f"{BASE_IP}/jobs"
 
 URL_LISTA_CP = "https://www.cp.pt/info/ofertas-disponiveis"
+URL_LISTA_ADA = "https://www.aguasdoalgarve.pt/content/recrutamento"
 
 FICHEIRO_SAIDA = "vagas.json"
 
@@ -519,6 +519,86 @@ def recolher_vagas_cp(page):
 
 
 # ============================================================
+# RECOLHA DA ÁGUAS DO ALGARVE (GRUPO ÁGUAS DE PORTUGAL)
+# ============================================================
+
+def recolher_vagas_aguas_algarve(page):
+    """Recolhe as ofertas da tabela da Águas do Algarve, ignorando as fechadas."""
+    vagas = {}
+    print("Águas do Algarve: a consultar ofertas de recrutamento...")
+
+    page.goto(URL_LISTA_ADA, wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(800)
+
+    linhas = page.locator("table tr").evaluate_all("""
+        rows => rows.map(tr => Array.from(tr.querySelectorAll('th, td')).map(celula => {
+            const link = celula.querySelector('a[href]');
+            return {
+                texto: (celula.innerText || celula.textContent || '').replace(/\\s+/g, ' ').trim(),
+                url: link ? link.href : ''
+            };
+        })).filter(celulas => celulas.length >= 3)
+    """)
+
+    if not linhas:
+        print("Águas do Algarve: não foi encontrada uma tabela com pelo menos três colunas.")
+        return []
+
+    # A tabela oficial apresenta LOCAL DE TRABALHO, CARGO e PRAZO CANDIDATURA.
+    # Detetar os índices pelos cabeçalhos evita depender totalmente da sua ordem.
+    indices = {"local": 0, "cargo": 1, "prazo": 2}
+    primeira = [sem_acentos(c.get("texto", "")) for c in linhas[0]]
+    if any("local de trabalho" in valor for valor in primeira):
+        for i, valor in enumerate(primeira):
+            if "local de trabalho" in valor:
+                indices["local"] = i
+            elif valor.strip() == "cargo":
+                indices["cargo"] = i
+            elif "prazo" in valor and "candidatura" in valor:
+                indices["prazo"] = i
+        linhas = linhas[1:]
+
+    for celulas in linhas:
+        try:
+            local = celulas[indices["local"]].get("texto", "").strip()
+            titulo = celulas[indices["cargo"]].get("texto", "").strip()
+            prazo = celulas[indices["prazo"]].get("texto", "").strip()
+        except (IndexError, TypeError):
+            continue
+
+        if not local or not titulo:
+            continue
+
+        # Importante: não publicar ofertas cujo prazo esteja marcado como Fechado.
+        if "fechado" in sem_acentos(prazo):
+            continue
+
+        # O link do anúncio costuma estar na célula do prazo. Procurar em toda a
+        # linha também permite lidar com alterações na disposição da tabela.
+        url = next(
+            (celula.get("url", "").strip() for celula in celulas if celula.get("url", "").strip()),
+            URL_LISTA_ADA,
+        )
+
+        distritos = identificar_distritos(local)
+        if not distritos:
+            distritos = ["Faro"] if "algarve" in sem_acentos(local) else ["Nacional / Vários"]
+
+        for distrito in distritos:
+            adicionar_vaga(vagas, {
+                "titulo": titulo,
+                "entidade": "Águas do Algarve (Grupo Águas de Portugal)",
+                "distrito": distrito,
+                "local": local,
+                "url": url,
+                "prazo_candidatura": prazo,
+            })
+
+    print(f"Águas do Algarve: {len(vagas)} vagas abertas recolhidas.")
+    return list(vagas.values())
+
+
+# ============================================================
 # EXECUÇÃO E PUBLICAÇÃO DO JSON
 # ============================================================
 
@@ -548,6 +628,11 @@ def main():
                 todas_as_vagas.extend(recolher_vagas_cp(page))
             except Exception as erro_cp:
                 print(f"ERRO CP: {erro_cp}")
+
+            try:
+                todas_as_vagas.extend(recolher_vagas_aguas_algarve(page))
+            except Exception as erro_ada:
+                print(f"ERRO Águas do Algarve: {erro_ada}")
 
         finally:
             browser.close()
@@ -593,9 +678,15 @@ def main():
         if vaga["entidade"] == "CP - Comboios de Portugal"
     )
 
+    total_ada = sum(
+        1 for vaga in lista_final
+        if vaga["entidade"] == "Águas do Algarve (Grupo Águas de Portugal)"
+    )
+
     print("=" * 45)
     print(f"IP: {total_ip} registos")
     print(f"CP: {total_cp} registos")
+    print(f"Águas do Algarve: {total_ada} registos")
     print(f"TOTAL: {len(lista_final)} registos")
     print(f"Ficheiro atualizado: {FICHEIRO_SAIDA}")
 
