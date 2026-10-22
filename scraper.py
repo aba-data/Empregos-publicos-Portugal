@@ -2,6 +2,8 @@ import json
 import re
 import unicodedata
 import urllib.request
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from urllib.parse import urljoin, urlparse, urlunparse
 from playwright.sync_api import sync_playwright
 
@@ -14,6 +16,7 @@ URL_LISTA_IP = f"{BASE_IP}/jobs"
 
 URL_LISTA_CP = "https://www.cp.pt/info/ofertas-disponiveis"
 URL_LISTA_ADA = "https://www.aguasdoalgarve.pt/content/recrutamento"
+URL_LISTA_ULS_ALGARVE = "https://www.ulsalg.min-saude.pt/concursos/?subcategory=0&year_filter=&status=active"
 
 FICHEIRO_SAIDA = "vagas.json"
 
@@ -258,6 +261,137 @@ def extrair_localizacoes(texto):
     return " | ".join(dict.fromkeys(localizacoes))
 
 
+MESES_PORTUGUESES = {
+    "janeiro": 1,
+    "fevereiro": 2,
+    "marco": 3,
+    "abril": 4,
+    "maio": 5,
+    "junho": 6,
+    "julho": 7,
+    "agosto": 8,
+    "setembro": 9,
+    "outubro": 10,
+    "novembro": 11,
+    "dezembro": 12,
+}
+
+# Datas de prazo aceites: 22/10/2026, 22-10-26, 2026-10-22,
+# ou 22 de outubro de 2026.
+PADRAO_DATA = re.compile(
+    r"\b(?:"
+    r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}"
+    r"|\d{4}-\d{2}-\d{2}"
+    r"|\d{1,2}\s+de\s+[A-Za-zÀ-ÿ]+\s+de\s+\d{4}"
+    r")\b",
+    flags=re.IGNORECASE,
+)
+
+
+def data_consulta_portal():
+    """Devolve a data local de Portugal continental no momento da consulta."""
+    try:
+        return datetime.now(ZoneInfo("Europe/Lisbon")).date()
+    except Exception:
+        # Compatibilidade caso o ambiente não tenha a base de fusos horários.
+        return datetime.now().date()
+
+
+def converter_data_prazo(valor):
+    """Converte uma data de prazo conhecida para date; devolve None se não reconhecer."""
+    valor = " ".join((valor or "").strip().split())
+    if not valor:
+        return None
+
+    # ISO: AAAA-MM-DD
+    correspondencia = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", valor)
+    if correspondencia:
+        try:
+            return date(int(correspondencia.group(1)), int(correspondencia.group(2)), int(correspondencia.group(3)))
+        except ValueError:
+            return None
+
+    # Formato numérico português: DD/MM/AAAA, DD-MM-AA ou DD.MM.AAAA.
+    correspondencia = re.fullmatch(r"(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})", valor)
+    if correspondencia:
+        dia, mes, ano = map(int, correspondencia.groups())
+        if ano < 100:
+            ano += 2000 if ano < 70 else 1900
+        try:
+            return date(ano, mes, dia)
+        except ValueError:
+            return None
+
+    # Formato textual: 22 de outubro de 2026.
+    correspondencia = re.fullmatch(
+        r"(\d{1,2})\s+de\s+([A-Za-zÀ-ÿ]+)\s+de\s+(\d{4})",
+        valor,
+        flags=re.IGNORECASE,
+    )
+    if correspondencia:
+        dia = int(correspondencia.group(1))
+        mes_texto = sem_acentos(correspondencia.group(2))
+        ano = int(correspondencia.group(3))
+        mes = MESES_PORTUGUESES.get(mes_texto)
+        if mes:
+            try:
+                return date(ano, mes, dia)
+            except ValueError:
+                return None
+    return None
+
+
+def extrair_prazo_candidatura(texto):
+    """Extrai apenas datas associadas explicitamente ao prazo de candidatura.
+
+    Não confunde a data de publicação do anúncio com a data limite.
+    """
+    if not texto:
+        return None
+
+    # Cada linha/frase é analisada separadamente para evitar associar por engano
+    # a data de publicação (normalmente no topo do anúncio) ao prazo final.
+    linhas = re.split(r"[\r\n]+|(?<=[.!?])\s+", str(texto))
+    padroes_prazo = [
+        re.compile(r"prazo.{0,100}candidatur", re.IGNORECASE),
+        re.compile(r"data\s+limite.{0,100}candidatur", re.IGNORECASE),
+        re.compile(r"candidaturas?.{0,220}\b(?:at[eé]|terminam|terminar|submeter).{0,40}", re.IGNORECASE),
+        re.compile(r"ser[aã]o\s+consideradas?.{0,220}\bcandidaturas?", re.IGNORECASE),
+    ]
+
+    for linha in linhas:
+        linha_limpa = " ".join(linha.split())
+        if not linha_limpa or not PADRAO_DATA.search(linha_limpa):
+            continue
+        if not any(padrao.search(linha_limpa) for padrao in padroes_prazo):
+            continue
+
+        for correspondencia_data in PADRAO_DATA.finditer(linha_limpa):
+            data_encontrada = converter_data_prazo(correspondencia_data.group(0))
+            if data_encontrada:
+                return data_encontrada
+    return None
+
+
+def prazo_candidatura_vigente(prazo, data_referencia=None):
+    """Filtra prazos vencidos; o próprio dia limite continua válido.
+
+    Se a origem não fornecer uma data de prazo reconhecível, mantém-se a vaga
+    quando a página fonte a apresenta como disponível/ativa. Assim, não se
+    inventam prazos para as entidades que não os publicam na listagem.
+    """
+    data_referencia = data_referencia or data_consulta_portal()
+    texto = sem_acentos(str(prazo or "").strip())
+
+    if any(termo in texto for termo in ("fechado", "encerrado", "expirado", "fora de prazo")):
+        return False
+
+    data_limite = prazo if isinstance(prazo, date) else converter_data_prazo(str(prazo or ""))
+    if data_limite is None:
+        return True
+    return data_limite >= data_referencia
+
+
 def adicionar_vaga(vagas, vaga):
     """
     Deduplica por entidade, URL e distrito.
@@ -278,13 +412,14 @@ def adicionar_vaga(vagas, vaga):
 # RECOLHA DA INFRAESTRUTURAS DE PORTUGAL
 # ============================================================
 
-def recolher_vagas_ip(page):
+def recolher_vagas_ip(page, data_referencia=None):
     """
     Recolhe dinamicamente os anúncios da IP e visita cada anúncio
     para tentar identificar a localização e o(s) distrito(s).
     """
     vagas = {}
     anuncios = {}
+    data_referencia = data_referencia or data_consulta_portal()
 
     print("IP: a abrir a lista de ofertas...")
 
@@ -352,6 +487,14 @@ def recolher_vagas_ip(page):
         except Exception as erro:
             print(f"IP: não foi possível ler os detalhes de {url}: {erro}")
 
+        # Se o anúncio indicar uma data limite de candidatura, excluir o anúncio
+        # quando essa data já passou. A lista da IP também pode não apresentar
+        # prazo explícito; nesses casos, confiamos na listagem oficial de ofertas.
+        data_limite = extrair_prazo_candidatura(texto_pagina)
+        if data_limite and data_limite < data_referencia:
+            print(f"IP: oferta excluída por prazo vencido ({data_limite.isoformat()}): {titulo}")
+            continue
+
         # Dar prioridade a linhas explicitamente identificadas como local.
         localizacao = extrair_localizacoes(texto_pagina)
         texto_para_identificar = " | ".join(
@@ -378,6 +521,7 @@ def recolher_vagas_ip(page):
                     "distrito": nome_distrito,
                     "local": localizacao or titulo_lista,
                     "url": url,
+                    **({"prazo_candidatura": data_limite.isoformat()} if data_limite else {}),
                 },
             )
 
@@ -389,9 +533,10 @@ def recolher_vagas_ip(page):
 # RECOLHA DA CP - DESCOBERTA DINÂMICA
 # ============================================================
 
-def recolher_vagas_cp(page):
+def recolher_vagas_cp(page, data_referencia=None):
     """Recolhe ofertas da página oficial da CP e visita cada anúncio."""
     vagas = {}
+    data_referencia = data_referencia or data_consulta_portal()
     print("CP: a consultar ofertas disponíveis...")
 
     page.goto(URL_LISTA_CP, wait_until="domcontentloaded", timeout=60000)
@@ -490,6 +635,15 @@ def recolher_vagas_cp(page):
             print(f"CP: título não identificado em {url}")
             continue
 
+        # Extrai o prazo indicado na candidatura, sem confundir com a data de
+        # publicação que pode aparecer no cabeçalho da página.
+        data_limite = extrair_prazo_candidatura(texto_pagina)
+        if data_limite is None:
+            data_limite = extrair_prazo_candidatura(item.get("contexto", ""))
+        if data_limite and data_limite < data_referencia:
+            print(f"CP: oferta excluída por prazo vencido ({data_limite.isoformat()}): {titulo}")
+            continue
+
         # A localização pode surgir como "Local:", "Localizações:" ou em
         # texto corrido, por exemplo "Lisboa-Rossio; Cais do Sodré; Faro".
         localizacao = extrair_localizacoes(texto_pagina)
@@ -512,6 +666,7 @@ def recolher_vagas_cp(page):
                 "distrito": distrito,
                 "local": localizacao or "Localização por confirmar",
                 "url": url,
+                **({"prazo_candidatura": data_limite.isoformat()} if data_limite else {}),
             })
 
     print(f"CP: {len(vagas)} registos por distrito recolhidos.")
@@ -522,19 +677,20 @@ def recolher_vagas_cp(page):
 # RECOLHA DA ÁGUAS DO ALGARVE (GRUPO ÁGUAS DE PORTUGAL)
 # ============================================================
 
-def recolher_vagas_aguas_algarve(page):
+def recolher_vagas_aguas_algarve(page, data_referencia=None):
     """Recolhe as ofertas da tabela da Águas do Algarve, ignorando as fechadas."""
     vagas = {}
+    data_referencia = data_referencia or data_consulta_portal()
     print("Águas do Algarve: a consultar ofertas de recrutamento...")
 
     page.goto(URL_LISTA_ADA, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(800)
 
-    linhas = page.locator("table tr").evaluate_all("""
+    linhas = page.locator("table tr").evaluate_all(r"""
         rows => rows.map(tr => Array.from(tr.querySelectorAll('th, td')).map(celula => {
             const link = celula.querySelector('a[href]');
             return {
-                texto: (celula.innerText || celula.textContent || '').replace(/\\s+/g, ' ').trim(),
+                texto: (celula.innerText || celula.textContent || '').replace(/\s+/g, ' ').trim(),
                 url: link ? link.href : ''
             };
         })).filter(celulas => celulas.length >= 3)
@@ -569,9 +725,12 @@ def recolher_vagas_aguas_algarve(page):
         if not local or not titulo:
             continue
 
-        # Importante: não publicar ofertas cujo prazo esteja marcado como Fechado.
-        if "fechado" in sem_acentos(prazo):
+        # Filtrar por estado e pela data limite. O prazo vale até ao final
+        # do próprio dia; a partir do dia seguinte a oferta deixa de ser publicada.
+        if not prazo_candidatura_vigente(prazo, data_referencia):
+            print(f"Águas do Algarve: oferta excluída por prazo vencido/fechado ({prazo}): {titulo}")
             continue
+        data_limite = converter_data_prazo(prazo)
 
         # O link do anúncio costuma estar na célula do prazo. Procurar em toda a
         # linha também permite lidar com alterações na disposição da tabela.
@@ -592,6 +751,7 @@ def recolher_vagas_aguas_algarve(page):
                 "local": local,
                 "url": url,
                 "prazo_candidatura": prazo,
+                **({"data_limite_candidatura": data_limite.isoformat()} if data_limite else {}),
             })
 
     print(f"Águas do Algarve: {len(vagas)} vagas abertas recolhidas.")
@@ -599,11 +759,355 @@ def recolher_vagas_aguas_algarve(page):
 
 
 # ============================================================
+# RECOLHA DA UNIDADE LOCAL DE SAÚDE DO ALGARVE
+# ============================================================
+
+ULS_NUMEROS_POR_EXTENSO = {
+    "um": 1, "uma": 1,
+    "dois": 2, "duas": 2,
+    "tres": 3,
+    "quatro": 4,
+    "cinco": 5,
+    "seis": 6,
+    "sete": 7,
+    "oito": 8,
+    "nove": 9,
+    "dez": 10,
+    "onze": 11,
+    "doze": 12,
+    "treze": 13,
+    "catorze": 14, "quatorze": 14,
+    "quinze": 15,
+    "dezasseis": 16, "dezesseis": 16,
+    "dezassete": 17, "dezessete": 17,
+    "dezoito": 18,
+    "dezanove": 19, "dezenove": 19,
+    "vinte": 20,
+    "trinta": 30,
+    "quarenta": 40,
+    "cinquenta": 50,
+    "sessenta": 60,
+}
+
+
+def _numero_portugues(valor):
+    """Converte números em algarismos ou escritos por extenso, para prazos da ULS."""
+    valor = sem_acentos(str(valor or "").strip()).lower()
+    if valor.isdigit():
+        return int(valor)
+    if valor in ULS_NUMEROS_POR_EXTENSO:
+        return ULS_NUMEROS_POR_EXTENSO[valor]
+    if " e " in valor:
+        partes = valor.split(" e ", 1)
+        base = ULS_NUMEROS_POR_EXTENSO.get(partes[0])
+        unidade = ULS_NUMEROS_POR_EXTENSO.get(partes[1])
+        if base is not None and unidade is not None and base >= 20 and unidade < 10:
+            return base + unidade
+    return None
+
+
+def _feriados_nacionais_portugal(ano):
+    """Feriados nacionais fixos e móveis relevantes para contar dias úteis."""
+    feriados = {
+        date(ano, 1, 1),
+        date(ano, 4, 25),
+        date(ano, 5, 1),
+        date(ano, 6, 10),
+        date(ano, 8, 15),
+        date(ano, 10, 5),
+        date(ano, 11, 1),
+        date(ano, 12, 1),
+        date(ano, 12, 8),
+        date(ano, 12, 25),
+    }
+
+    # Algoritmo gregoriano para obter o Domingo de Páscoa.
+    a = ano % 19
+    b = ano // 100
+    c = ano % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    mes = (h + l - 7 * m + 114) // 31
+    dia = ((h + l - 7 * m + 114) % 31) + 1
+    pascoa = date(ano, mes, dia)
+    feriados.add(pascoa - timedelta(days=2))  # Sexta-feira Santa
+    feriados.add(pascoa + timedelta(days=60))  # Corpo de Deus
+    return feriados
+
+
+def _somar_dias_uteis_uls(data_publicacao, numero_dias):
+    """Conta dias úteis a partir do dia seguinte à publicação, excluindo feriados nacionais."""
+    data_atual = data_publicacao
+    contados = 0
+    feriados_cache = {}
+    while contados < numero_dias:
+        data_atual += timedelta(days=1)
+        feriados = feriados_cache.setdefault(
+            data_atual.year, _feriados_nacionais_portugal(data_atual.year)
+        )
+        if data_atual.weekday() < 5 and data_atual not in feriados:
+            contados += 1
+    return data_atual
+
+
+def _extrair_data_publicacao_uls(texto):
+    """Extrai a data do campo de publicação do site, não datas citadas no aviso.
+
+    Importante: o corpo dos avisos também contém expressões como
+    "publicado no Boletim ... de 22/06/2018". Essas datas não são a data em
+    que o concurso foi publicado no portal e nunca devem ser usadas para
+    calcular o prazo de candidatura.
+    """
+    if not texto:
+        return None
+
+    linhas = [" ".join(linha.split()) for linha in str(texto).splitlines() if linha.strip()]
+    padrao_campo_publicacao = re.compile(
+        r"^\s*(?:data\s+de\s+publica[cç][aã]o|publicado|publicada)\s*:\s*(.*?)\s*$",
+        re.IGNORECASE,
+    )
+
+    # Primeiro, aceitar apenas campos explícitos e ancorados no início da linha,
+    # como "Publicado: 20 de Outubro de 2026". Não procurar a palavra
+    # "publicado" livremente no corpo do anúncio.
+    for indice, linha in enumerate(linhas):
+        correspondencia_campo = padrao_campo_publicacao.match(linha)
+        if not correspondencia_campo:
+            continue
+
+        valor_data = correspondencia_campo.group(1).strip()
+        if not valor_data and indice + 1 < len(linhas):
+            valor_data = linhas[indice + 1]
+
+        for correspondencia_data in PADRAO_DATA.finditer(valor_data):
+            data_encontrada = converter_data_prazo(correspondencia_data.group(0))
+            if data_encontrada:
+                return data_encontrada
+
+    return None
+
+
+def _extrair_prazo_dias_uls(texto):
+    """Obtém a duração do prazo de candidatura (dias úteis ou dias corridos)."""
+    if not texto:
+        return None, None
+
+    padrao_duracao = re.compile(
+        r"(?P<num1>\d{1,3}|[A-Za-zÀ-ÿ]+(?:\s+e\s+[A-Za-zÀ-ÿ]+)?)"
+        r"\s*(?:\(\s*(?P<num2>\d{1,3}|[A-Za-zÀ-ÿ]+(?:\s+e\s+[A-Za-zÀ-ÿ]+)?)\s*\))?"
+        r"\s+dias?\s*(?P<tipo>úteis|uteis|corridos|consecutivos|seguidos|naturais)?\b",
+        re.IGNORECASE,
+    )
+    texto_linhas = re.split(r"[\r\n]+|(?<=[.!?])\s+", str(texto))
+    for linha in texto_linhas:
+        linha_limpa = " ".join(linha.split())
+        linha_norm = sem_acentos(linha_limpa)
+        if not linha_limpa or not any(
+            palavra in linha_norm
+            for palavra in ("candidatura", "candidaturas", "prazo de", "contados a partir", "contado a partir")
+        ):
+            continue
+        for match in padrao_duracao.finditer(linha_limpa):
+            # Evita capturar números de prazos alheios (por exemplo, validade da bolsa).
+            antes = linha_norm[max(0, match.start() - 180):match.start()]
+            depois = linha_norm[match.end():match.end() + 180]
+            contexto = antes + " " + depois
+            relacionado_candidatura = (
+                "candidatura" in contexto
+                or "contados a partir" in contexto
+                or "contado a partir" in contexto
+                or "data da publicacao" in contexto
+                or "apresentacao de candidatura" in contexto
+            )
+            if not relacionado_candidatura:
+                continue
+
+            numero = _numero_portugues(match.group("num1"))
+            numero_secundario = _numero_portugues(match.group("num2"))
+            if numero is None:
+                numero = numero_secundario
+            if match.group("num2") and str(match.group("num2")).strip().isdigit():
+                numero = int(match.group("num2"))
+            if match.group("num1") and str(match.group("num1")).strip().isdigit():
+                numero = int(match.group("num1"))
+
+            if numero is None or numero <= 0 or numero > 365:
+                continue
+            tipo = sem_acentos(match.group("tipo") or "corridos")
+            return numero, ("uteis" if tipo == "uteis" else "corridos")
+    return None, None
+
+
+def _extrair_data_limite_explicita_uls(texto):
+    """Procura uma data-limite escrita explicitamente no aviso."""
+    if not texto:
+        return None
+
+    partes = re.split(r"[\r\n]+|(?<=[.!?])\s+", str(texto))
+    indicios_limite = re.compile(
+        r"\b(?:data\s+limite|prazo.{0,80}(?:termina|terminar|terminar[aá]|at[eé])|"
+        r"candidaturas?.{0,160}(?:at[eé]|terminam|terminar|terminar[aá]|encerram-se)|"
+        r"at[eé]\s+(?:ao\s+)?dia|ultimo\s+dia\s+para|encerramento\s+das\s+candidaturas)\b",
+        re.IGNORECASE,
+    )
+    for parte in partes:
+        parte_limpa = " ".join(parte.split())
+        if not indicios_limite.search(parte_limpa):
+            continue
+        # Não usar como data-limite a data de publicação acompanhada de uma duração.
+        if re.search(r"contad[oa]s?\s+a\s+partir\s+da\s+data\s+da\s+publica[cç][aã]o", parte_limpa, re.IGNORECASE):
+            continue
+        for correspondencia in PADRAO_DATA.finditer(parte_limpa):
+            data_encontrada = converter_data_prazo(correspondencia.group(0))
+            if data_encontrada:
+                return data_encontrada
+    return None
+
+
+def _calcular_data_limite_uls(texto_aviso):
+    """Calcula a data-limite do concurso usando a data de publicação da página."""
+    data_limite = _extrair_data_limite_explicita_uls(texto_aviso)
+    if data_limite:
+        return data_limite, "data-limite explícita"
+
+    data_publicacao = _extrair_data_publicacao_uls(texto_aviso)
+    numero_dias, tipo_dias = _extrair_prazo_dias_uls(texto_aviso)
+    if not data_publicacao or not numero_dias or not tipo_dias:
+        return None, "não foi possível determinar a data de publicação e/ou a duração do prazo"
+
+    if tipo_dias == "uteis":
+        return _somar_dias_uteis_uls(data_publicacao, numero_dias), f"{numero_dias} dias úteis desde {data_publicacao.isoformat()}"
+    return data_publicacao + timedelta(days=numero_dias), f"{numero_dias} dias corridos desde {data_publicacao.isoformat()}"
+
+
+def recolher_vagas_uls_algarve(page, data_referencia=None):
+    """Recolhe apenas concursos da ULS Algarve cujo prazo de candidatura ainda decorre."""
+    vagas = {}
+    anuncios = {}
+    data_referencia = data_referencia or data_consulta_portal()
+    print(f"ULS Algarve: a consultar concursos ativos; data de referência {data_referencia.isoformat()}...")
+
+    # O filtro oficial limita a listagem aos anúncios assinalados como "Em Curso".
+    page.goto(URL_LISTA_ULS_ALGARVE, wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(400)
+
+    links_paginacao = page.locator("a[href*='pg=']").evaluate_all("els => els.map(a => a.href)")
+    paginas = [
+        int(m.group(1))
+        for link in links_paginacao
+        if (m := re.search(r"[?&]pg=(\d+)", link))
+    ]
+    ultima_pagina = min(max(paginas, default=1), 100)
+
+    for numero in range(1, ultima_pagina + 1):
+        if numero == 1:
+            url_pagina = URL_LISTA_ULS_ALGARVE
+        else:
+            url_pagina = f"https://www.ulsalg.min-saude.pt/concursos/?subcategory=0&year_filter=&status=active&pg={numero}"
+
+        print(f"ULS Algarve: página {numero}/{ultima_pagina}...")
+        page.goto(url_pagina, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(250)
+
+        elementos = page.locator("a[href*='/concursos/']").evaluate_all(r"""
+            anchors => anchors.map(a => {
+                const limpar = valor => (valor || '').replace(/\s+/g, ' ').trim();
+                const href = a.href || '';
+                let no = a;
+                let textoCartao = '';
+                for (let passo = 0; no && passo < 8; passo++, no = no.parentElement) {
+                    const texto = limpar(no.innerText || no.textContent || '');
+                    if (texto.length > 10 && texto.length < 3500 && /em\s+curso/i.test(texto)) {
+                        textoCartao = texto;
+                        break;
+                    }
+                }
+                let titulo = limpar(a.innerText || a.textContent || '');
+                const tituloNo = a.closest('h1, h2, h3, h4');
+                if (tituloNo) titulo = limpar(tituloNo.innerText || tituloNo.textContent || titulo);
+                return { titulo, url: href, contexto: textoCartao };
+            })
+        """)
+
+        for item in elementos:
+            url = normalizar_url(item.get("url", ""))
+            partes_url = urlparse(url)
+            host = (partes_url.hostname or "").lower()
+            caminho = partes_url.path.rstrip("/")
+
+            if host not in {"ulsalg.min-saude.pt", "www.ulsalg.min-saude.pt"}:
+                continue
+            if not re.fullmatch(r"/concursos/[^/]+", caminho, flags=re.I):
+                continue
+
+            titulo = " ".join((item.get("titulo") or "").split())
+            if not titulo or sem_acentos(titulo) in {"ver detalhes", "detalhes"}:
+                continue
+            if re.search(r"\b(anulado|anulada|cancelado|cancelada|revogado|revogada)\b", sem_acentos(titulo)):
+                print(f"ULS Algarve: concurso anulado/cancelado ignorado: {titulo}")
+                continue
+
+            # Mantém o título e contexto da listagem; URLs repetidos são deduplicados.
+            if url not in anuncios or len(titulo) > len(anuncios[url]["titulo"]):
+                anuncios[url] = {"titulo": titulo, "contexto_lista": item.get("contexto", "")}
+
+    print(f"ULS Algarve: {len(anuncios)} concursos únicos encontrados no filtro ativo; a validar prazos...")
+
+    for indice, (url, item) in enumerate(anuncios.items(), start=1):
+        titulo_lista = item["titulo"]
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            texto_aviso = page.locator("body").inner_text(timeout=15000)
+            titulo_pagina = page.locator("h1").first.inner_text(timeout=3000).strip()
+            titulo = titulo_pagina or titulo_lista
+        except Exception as erro:
+            print(f"ULS Algarve: não foi possível ler o aviso ({titulo_lista}): {erro}")
+            continue
+
+        # Rejeita igualmente avisos anulados cujo título só o artigo completo esclareça.
+        if re.search(r"\b(anulado|anulada|cancelado|cancelada|revogado|revogada)\b", sem_acentos(titulo + " " + texto_aviso[:1200])):
+            print(f"ULS Algarve: aviso anulado/cancelado ignorado: {titulo}")
+            continue
+
+        data_limite, motivo_calculo = _calcular_data_limite_uls(texto_aviso)
+        if data_limite is None:
+            print(f"ULS Algarve: aviso excluído porque não foi possível confirmar o prazo ({titulo}): {motivo_calculo}")
+            continue
+        if data_limite < data_referencia:
+            print(f"ULS Algarve: aviso excluído por prazo vencido em {data_limite.isoformat()} ({titulo}; cálculo: {motivo_calculo})")
+            continue
+
+        print(f"ULS Algarve: aviso aceite até {data_limite.isoformat()} ({titulo}; cálculo: {motivo_calculo})")
+        distritos = identificar_distritos(titulo) or ["Faro"]
+        for distrito in distritos:
+            adicionar_vaga(vagas, {
+                "titulo": titulo,
+                "entidade": "Unidade Local de Saúde do Algarve (ULS Algarve)",
+                "distrito": distrito,
+                "local": "Algarve",
+                "url": url,
+                "estado": "Em Curso",
+                "prazo_candidatura": data_limite.isoformat(),
+            })
+
+    print(f"ULS Algarve: {len(vagas)} registos com prazo vigente recolhidos.")
+    return list(vagas.values())
+
+# ============================================================
 # EXECUÇÃO E PUBLICAÇÃO DO JSON
 # ============================================================
 
 def main():
     todas_as_vagas = []
+    data_referencia = data_consulta_portal()
+    print(f"Data de consulta do portal de empregos: {data_referencia.isoformat()}")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -620,19 +1124,24 @@ def main():
             # A falha de uma entidade não impede necessariamente
             # a recolha da outra.
             try:
-                todas_as_vagas.extend(recolher_vagas_ip(page))
+                todas_as_vagas.extend(recolher_vagas_ip(page, data_referencia))
             except Exception as erro_ip:
                 print(f"ERRO IP: {erro_ip}")
 
             try:
-                todas_as_vagas.extend(recolher_vagas_cp(page))
+                todas_as_vagas.extend(recolher_vagas_cp(page, data_referencia))
             except Exception as erro_cp:
                 print(f"ERRO CP: {erro_cp}")
 
             try:
-                todas_as_vagas.extend(recolher_vagas_aguas_algarve(page))
+                todas_as_vagas.extend(recolher_vagas_aguas_algarve(page, data_referencia))
             except Exception as erro_ada:
                 print(f"ERRO Águas do Algarve: {erro_ada}")
+
+            try:
+                todas_as_vagas.extend(recolher_vagas_uls_algarve(page, data_referencia))
+            except Exception as erro_uls:
+                print(f"ERRO ULS Algarve: {erro_uls}")
 
         finally:
             browser.close()
@@ -651,6 +1160,9 @@ def main():
         vagas_finais[chave] = vaga
 
     lista_final = list(vagas_finais.values())
+    # Registar em cada registo a data em que o scraper consultou as fontes.
+    for vaga in lista_final:
+        vaga["data_consulta"] = data_referencia.isoformat()
 
     # Não substituir o JSON por uma lista vazia se tudo falhar.
     if not lista_final:
@@ -683,10 +1195,16 @@ def main():
         if vaga["entidade"] == "Águas do Algarve (Grupo Águas de Portugal)"
     )
 
+    total_uls = sum(
+        1 for vaga in lista_final
+        if vaga["entidade"] == "Unidade Local de Saúde do Algarve (ULS Algarve)"
+    )
+
     print("=" * 45)
     print(f"IP: {total_ip} registos")
     print(f"CP: {total_cp} registos")
     print(f"Águas do Algarve: {total_ada} registos")
+    print(f"ULS Algarve: {total_uls} registos")
     print(f"TOTAL: {len(lista_final)} registos")
     print(f"Ficheiro atualizado: {FICHEIRO_SAIDA}")
 
