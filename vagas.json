@@ -1440,30 +1440,27 @@
     "data_consulta": "2026-10-23"
   },
   {
-    "titulo": "Assistente Administrativo – Suporte e Logística (Secretaria-Geral)",
+    "titulo": "Assistente Administrativo - Secretaria-Geral",
     "entidade": "CP - Comboios de Portugal",
-    "distrito": "Lisboa",
-    "local": "Lisboa – Rossio (com deslocações inerentes ao exercício das funções)",
+    "distrito": "Nacional / Vários",
+    "local": "Localização por confirmar",
     "url": "https://www.cp.pt/info/w/institucional/assistente-administrativo-secretaria-geral",
-    "prazo_candidatura": "2026-10-25",
     "data_consulta": "2026-10-23"
   },
   {
-    "titulo": "Operador(a) de Revisão e Venda – Revisor(a)",
+    "titulo": "Revisor (ORV)",
     "entidade": "CP - Comboios de Portugal",
-    "distrito": "Lisboa",
+    "distrito": "Nacional / Vários",
     "local": "Localização por confirmar",
     "url": "https://www.cp.pt/info/w/institucional/revisor-orv",
-    "prazo_candidatura": "2026-10-26",
     "data_consulta": "2026-10-23"
   },
   {
-    "titulo": "Operador(a) de Revisão e Venda – Revisor(a)",
+    "titulo": "Técnico de Manutenção",
     "entidade": "CP - Comboios de Portugal",
-    "distrito": "Faro",
+    "distrito": "Nacional / Vários",
     "local": "Localização por confirmar",
-    "url": "https://www.cp.pt/info/w/institucional/revisor-orv",
-    "prazo_candidatura": "2026-10-26",
+    "url": "https://www.cp.pt/info/w/institucional/tecnico-manutencao",
     "data_consulta": "2026-10-23"
   }
 ]
