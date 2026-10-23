@@ -891,6 +891,22 @@ def _extrair_data_publicacao_uls(texto):
             if data_encontrada:
                 return data_encontrada
 
+    # Fallback: em algumas páginas a extração do texto não preserva a quebra
+    # de linha entre o rótulo "Publicado:" e a data.
+    texto_corrida = " ".join(str(texto).split())
+    padrao_data_publicacao = re.compile(
+        r"(?:data\s+de\s+publica[cç][aã]o|publicado|publicada)\s*:?\s*("
+        r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|"
+        r"\d{4}-\d{2}-\d{2}|"
+        r"\d{1,2}\s+de\s+[A-Za-zÀ-ÿ]+\s+de\s+\d{4})",
+        re.IGNORECASE,
+    )
+    correspondencia = padrao_data_publicacao.search(texto_corrida)
+    if correspondencia:
+        data_encontrada = converter_data_prazo(correspondencia.group(1))
+        if data_encontrada:
+            return data_encontrada
+
     return None
 
 
@@ -988,91 +1004,126 @@ def _calcular_data_limite_uls(texto_aviso):
 
 
 def recolher_vagas_uls_algarve(page, data_referencia=None):
-    """Recolhe apenas concursos da ULS Algarve cujo prazo de candidatura ainda decorre."""
+    """Recolhe concursos ativos da ULS Algarve e mantém apenas prazos vigentes."""
     vagas = {}
     anuncios = {}
     data_referencia = data_referencia or data_consulta_portal()
     print(f"ULS Algarve: a consultar concursos ativos; data de referência {data_referencia.isoformat()}...")
 
-    # O filtro oficial limita a listagem aos anúncios assinalados como "Em Curso".
-    page.goto(URL_LISTA_ULS_ALGARVE, wait_until="domcontentloaded", timeout=60000)
-    page.wait_for_timeout(400)
-
-    links_paginacao = page.locator("a[href*='pg=']").evaluate_all("els => els.map(a => a.href)")
-    paginas = [
-        int(m.group(1))
-        for link in links_paginacao
-        if (m := re.search(r"[?&]pg=(\d+)", link))
-    ]
-    ultima_pagina = min(max(paginas, default=1), 100)
-
-    for numero in range(1, ultima_pagina + 1):
-        if numero == 1:
-            url_pagina = URL_LISTA_ULS_ALGARVE
-        else:
-            url_pagina = f"https://www.ulsalg.min-saude.pt/concursos/?subcategory=0&year_filter=&status=active&pg={numero}"
-
-        print(f"ULS Algarve: página {numero}/{ultima_pagina}...")
+    def ler_pagina_listagem(url_pagina):
+        """Recolhe links para anúncios, tolerando alterações de marcação HTML."""
         page.goto(url_pagina, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(250)
-
-        elementos = page.locator("a[href*='/concursos/']").evaluate_all(r"""
+        page.wait_for_timeout(800)
+        corpo = page.locator("body").inner_text(timeout=15000)
+        elementos = page.locator("a[href]").evaluate_all(r"""
             anchors => anchors.map(a => {
                 const limpar = valor => (valor || '').replace(/\s+/g, ' ').trim();
                 const href = a.href || '';
+                const heading = a.closest('h1, h2, h3, h4');
+                let titulo = limpar(heading ? heading.innerText : '');
+                if (!titulo) titulo = limpar(a.innerText || a.textContent || '');
                 let no = a;
-                let textoCartao = '';
-                for (let passo = 0; no && passo < 8; passo++, no = no.parentElement) {
+                let contexto = '';
+                for (let passo = 0; no && passo < 9; passo++, no = no.parentElement) {
                     const texto = limpar(no.innerText || no.textContent || '');
                     if (texto.length > 10 && texto.length < 3500 && /em\s+curso/i.test(texto)) {
-                        textoCartao = texto;
+                        contexto = texto;
                         break;
                     }
                 }
-                let titulo = limpar(a.innerText || a.textContent || '');
-                const tituloNo = a.closest('h1, h2, h3, h4');
-                if (tituloNo) titulo = limpar(tituloNo.innerText || tituloNo.textContent || titulo);
-                return { titulo, url: href, contexto: textoCartao };
+                return { titulo, url: href, contexto };
             })
         """)
+        links_paginacao = page.locator("a[href]").evaluate_all("els => els.map(a => a.href)")
+        return corpo, elementos, links_paginacao
 
+    def adicionar_elementos(elementos):
         for item in elementos:
-            url = normalizar_url(item.get("url", ""))
+            url_original = (item.get("url") or "").strip()
+            if not url_original:
+                continue
+            url = normalizar_url(url_original)
             partes_url = urlparse(url)
             host = (partes_url.hostname or "").lower()
             caminho = partes_url.path.rstrip("/")
 
-            if host not in {"ulsalg.min-saude.pt", "www.ulsalg.min-saude.pt"}:
+            # Aceitar também o antigo domínio oficial chualgarve.min-saude.pt.
+            dominio_oficial = host == "min-saude.pt" or host.endswith(".min-saude.pt")
+            segmentos = caminho.split("/")
+            if not dominio_oficial or len(segmentos) < 3 or segmentos[1].casefold() != "concursos" or not segmentos[2]:
                 continue
-            if not re.fullmatch(r"/concursos/[^/]+", caminho, flags=re.I):
+            if len(segmentos) > 3:
                 continue
 
             titulo = " ".join((item.get("titulo") or "").split())
-            if not titulo or sem_acentos(titulo) in {"ver detalhes", "detalhes"}:
+            if not titulo or sem_acentos(titulo) in {"ver detalhes", "detalhes", "ler mais"}:
                 continue
             if re.search(r"\b(anulado|anulada|cancelado|cancelada|revogado|revogada)\b", sem_acentos(titulo)):
                 print(f"ULS Algarve: concurso anulado/cancelado ignorado: {titulo}")
                 continue
 
-            # Mantém o título e contexto da listagem; URLs repetidos são deduplicados.
+            contexto = item.get("contexto", "") or ""
             if url not in anuncios or len(titulo) > len(anuncios[url]["titulo"]):
-                anuncios[url] = {"titulo": titulo, "contexto_lista": item.get("contexto", "")}
+                anuncios[url] = {"titulo": titulo, "contexto_lista": contexto}
+
+    # O filtro oficial status=active corresponde aos concursos em curso.
+    corpo_inicial, elementos_iniciais, links_paginacao = ler_pagina_listagem(URL_LISTA_ULS_ALGARVE)
+    adicionar_elementos(elementos_iniciais)
+
+    # Detetar a chave real de paginação em vez de assumir apenas 'pg'.
+    numero_paginas = []
+    parametro_pagina = "pg"
+    for link in links_paginacao:
+        m = re.search(r"[?&](pg|page|paged|pagina)=(\d+)", link, re.IGNORECASE)
+        if m:
+            parametro_pagina = m.group(1)
+            numero_paginas.append(int(m.group(2)))
+    ultima_pagina = min(max(numero_paginas, default=1), 100)
+
+    for numero in range(2, ultima_pagina + 1):
+        url_pagina = (
+            "https://www.ulsalg.min-saude.pt/concursos/"
+            f"?subcategory=0&year_filter=&status=active&{parametro_pagina}={numero}"
+        )
+        print(f"ULS Algarve: página {numero}/{ultima_pagina}...")
+        try:
+            _, elementos, _ = ler_pagina_listagem(url_pagina)
+            adicionar_elementos(elementos)
+        except Exception as erro:
+            print(f"ULS Algarve: não foi possível ler a página {numero}: {erro}")
+
+    if not anuncios:
+        resumo = " ".join(corpo_inicial.split())[:350]
+        print(f"ULS Algarve: não foram identificados links de anúncios. Texto da listagem: {resumo}")
+        raise RuntimeError("A listagem da ULS não devolveu links de anúncios reconhecíveis; consultar o log do GitHub Actions.")
 
     print(f"ULS Algarve: {len(anuncios)} concursos únicos encontrados no filtro ativo; a validar prazos...")
 
-    for indice, (url, item) in enumerate(anuncios.items(), start=1):
+    for url, item in anuncios.items():
         titulo_lista = item["titulo"]
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(250)
             texto_aviso = page.locator("body").inner_text(timeout=15000)
-            titulo_pagina = page.locator("h1").first.inner_text(timeout=3000).strip()
-            titulo = titulo_pagina or titulo_lista
         except Exception as erro:
-            print(f"ULS Algarve: não foi possível ler o aviso ({titulo_lista}): {erro}")
+            print(f"ULS Algarve: não foi possível ler o corpo do aviso ({titulo_lista}): {erro}")
             continue
 
-        # Rejeita igualmente avisos anulados cujo título só o artigo completo esclareça.
-        if re.search(r"\b(anulado|anulada|cancelado|cancelada|revogado|revogada)\b", sem_acentos(titulo + " " + texto_aviso[:1200])):
+        # A ausência de um h1 não deve descartar um aviso se o corpo foi lido.
+        titulo = titulo_lista
+        for seletor in ("h1", "h2", "h3"):
+            try:
+                cabecalho = page.locator(seletor)
+                if cabecalho.count() > 0:
+                    texto_cabecalho = " ".join(cabecalho.first.inner_text(timeout=1500).split())
+                    if texto_cabecalho and sem_acentos(texto_cabecalho) not in {"concursos", "recrutamento | concursos"}:
+                        titulo = texto_cabecalho
+                        break
+            except Exception:
+                # Manter o título recolhido na listagem.
+                pass
+
+        if re.search(r"\b(anulado|anulada|cancelado|cancelada|revogado|revogada)\b", sem_acentos(titulo + " " + texto_aviso[:1500])):
             print(f"ULS Algarve: aviso anulado/cancelado ignorado: {titulo}")
             continue
 
@@ -1085,7 +1136,7 @@ def recolher_vagas_uls_algarve(page, data_referencia=None):
             continue
 
         print(f"ULS Algarve: aviso aceite até {data_limite.isoformat()} ({titulo}; cálculo: {motivo_calculo})")
-        distritos = identificar_distritos(titulo) or ["Faro"]
+        distritos = identificar_distritos(titulo + " " + texto_aviso[:2500]) or ["Faro"]
         for distrito in distritos:
             adicionar_vaga(vagas, {
                 "titulo": titulo,
