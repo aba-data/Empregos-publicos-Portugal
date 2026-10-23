@@ -911,53 +911,54 @@ def _extrair_data_publicacao_uls(texto):
 
 
 def _extrair_prazo_dias_uls(texto):
-    """Obtém a duração do prazo de candidatura (dias úteis ou dias corridos)."""
+    """Extrai a duração do prazo de candidatura, mesmo que o HTML quebre linhas."""
     if not texto:
         return None, None
 
+    # O inner_text() do Playwright pode inserir quebras de linha no meio de um
+    # parágrafo (por exemplo entre "dias úteis" e "contados a partir"). Por isso
+    # a análise é feita sobre texto normalizado e não por linhas separadas.
+    texto_corrida = " ".join(str(texto).split())
+    texto_norm = sem_acentos(texto_corrida)
     padrao_duracao = re.compile(
         r"(?P<num1>\d{1,3}|[A-Za-zÀ-ÿ]+(?:\s+e\s+[A-Za-zÀ-ÿ]+)?)"
         r"\s*(?:\(\s*(?P<num2>\d{1,3}|[A-Za-zÀ-ÿ]+(?:\s+e\s+[A-Za-zÀ-ÿ]+)?)\s*\))?"
         r"\s+dias?\s*(?P<tipo>úteis|uteis|corridos|consecutivos|seguidos|naturais)?\b",
         re.IGNORECASE,
     )
-    texto_linhas = re.split(r"[\r\n]+|(?<=[.!?])\s+", str(texto))
-    for linha in texto_linhas:
-        linha_limpa = " ".join(linha.split())
-        linha_norm = sem_acentos(linha_limpa)
-        if not linha_limpa or not any(
-            palavra in linha_norm
-            for palavra in ("candidatura", "candidaturas", "prazo de", "contados a partir", "contado a partir")
-        ):
+
+    for match in padrao_duracao.finditer(texto_corrida):
+        antes = sem_acentos(texto_corrida[max(0, match.start() - 260):match.start()])
+        depois = sem_acentos(texto_corrida[match.end():match.end() + 300])
+        contexto = antes + " " + depois
+
+        # Excluir durações que se referem à validade da bolsa ou do concurso,
+        # não ao prazo para apresentar candidaturas.
+        if re.search(r"prazo\s+de\s+validade|validade\s+do\s+(?:procedimento|concurso|aviso|bolsa)", antes[-150:]):
             continue
-        for match in padrao_duracao.finditer(linha_limpa):
-            # Evita capturar números de prazos alheios (por exemplo, validade da bolsa).
-            antes = linha_norm[max(0, match.start() - 180):match.start()]
-            depois = linha_norm[match.end():match.end() + 180]
-            contexto = antes + " " + depois
-            relacionado_candidatura = (
-                "candidatura" in contexto
-                or "contados a partir" in contexto
-                or "contado a partir" in contexto
-                or "data da publicacao" in contexto
-                or "apresentacao de candidatura" in contexto
-            )
-            if not relacionado_candidatura:
-                continue
 
-            numero = _numero_portugues(match.group("num1"))
-            numero_secundario = _numero_portugues(match.group("num2"))
-            if numero is None:
-                numero = numero_secundario
-            if match.group("num2") and str(match.group("num2")).strip().isdigit():
-                numero = int(match.group("num2"))
-            if match.group("num1") and str(match.group("num1")).strip().isdigit():
-                numero = int(match.group("num1"))
+        ligado_a_candidatura = any(termo in contexto for termo in (
+            "candidatura", "candidaturas", "apresentacao de candidatura",
+            "contados a partir", "contado a partir", "data da publicacao",
+            "formalizacao das candidaturas", "prazo de candidatura",
+        ))
+        tem_contexto_de_prazo = "prazo" in antes[-150:]
+        if not ligado_a_candidatura or not tem_contexto_de_prazo:
+            continue
 
-            if numero is None or numero <= 0 or numero > 365:
-                continue
-            tipo = sem_acentos(match.group("tipo") or "corridos")
-            return numero, ("uteis" if tipo == "uteis" else "corridos")
+        numero = _numero_portugues(match.group("num1"))
+        numero_secundario = _numero_portugues(match.group("num2"))
+        if numero is None:
+            numero = numero_secundario
+        if match.group("num2") and str(match.group("num2")).strip().isdigit():
+            numero = int(match.group("num2"))
+        if match.group("num1") and str(match.group("num1")).strip().isdigit():
+            numero = int(match.group("num1"))
+        if numero is None or numero <= 0 or numero > 365:
+            continue
+        tipo = sem_acentos(match.group("tipo") or "corridos")
+        return numero, ("uteis" if tipo == "uteis" else "corridos")
+
     return None, None
 
 
@@ -1004,112 +1005,142 @@ def _calcular_data_limite_uls(texto_aviso):
 
 
 def recolher_vagas_uls_algarve(page, data_referencia=None):
-    """Recolhe concursos ativos da ULS Algarve e mantém apenas prazos vigentes."""
+    """Recolhe apenas concursos ULS em curso e com prazo de candidatura vigente."""
     vagas = {}
     anuncios = {}
     data_referencia = data_referencia or data_consulta_portal()
     print(f"ULS Algarve: a consultar concursos ativos; data de referência {data_referencia.isoformat()}...")
 
     def ler_pagina_listagem(url_pagina):
-        """Recolhe links para anúncios, tolerando alterações de marcação HTML."""
         page.goto(url_pagina, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(800)
-        corpo = page.locator("body").inner_text(timeout=15000)
+        # Aguarda brevemente conteúdo gerado pelo tema WordPress, sem depender
+        # de um seletor específico que possa mudar.
+        page.wait_for_timeout(1000)
+        corpo = page.locator("body").inner_text(timeout=20000)
         elementos = page.locator("a[href]").evaluate_all(r"""
             anchors => anchors.map(a => {
-                const limpar = valor => (valor || '').replace(/\s+/g, ' ').trim();
+                const limpar = v => (v || '').replace(/\s+/g, ' ').trim();
+                const acao = /^(ver detalhes|detalhes|ler mais|saber mais|consultar|ver concurso)$/i;
                 const href = a.href || '';
-                const heading = a.closest('h1, h2, h3, h4');
-                let titulo = limpar(heading ? heading.innerText : '');
-                if (!titulo) titulo = limpar(a.innerText || a.textContent || '');
-                let no = a;
+                let titulo = '';
+                const heading = a.closest('h1, h2, h3, h4, h5');
+                if (heading) titulo = limpar(heading.innerText || heading.textContent || '');
+                if (!titulo) titulo = limpar(a.innerText || a.textContent || a.getAttribute('aria-label') || a.title || '');
+
                 let contexto = '';
-                for (let passo = 0; no && passo < 9; passo++, no = no.parentElement) {
-                    const texto = limpar(no.innerText || no.textContent || '');
-                    if (texto.length > 10 && texto.length < 3500 && /em\s+curso/i.test(texto)) {
-                        contexto = texto;
+                let no = a;
+                for (let passo = 0; no && passo < 10; passo++, no = no.parentElement) {
+                    const textoBruto = no.innerText || no.textContent || '';
+                    const texto = limpar(textoBruto);
+                    // O cartão da oferta contém normalmente o estado "Em Curso".
+                    if (texto.length > 20 && texto.length < 4000 && /em\s+curso/i.test(texto)) {
+                        contexto = String(textoBruto).split(/\n+/).map(limpar).filter(Boolean).join('\n');
+                        const titulos = Array.from(no.querySelectorAll('h1,h2,h3,h4,h5,[class*=title],[class*=titulo]'))
+                            .map(el => limpar(el.innerText || el.textContent || ''))
+                            .filter(t => t && !acao.test(t) && !/^em curso$/i.test(t) && t.length <= 240);
+                        if (titulos.length) titulo = titulos.sort((x,y) => y.length - x.length)[0];
                         break;
                     }
+                }
+
+                // Alguns cartões só ligam o botão "Ver Detalhes" ao anúncio;
+                // nesse caso, recuperar o título pelo texto do próprio cartão.
+                if (!titulo || acao.test(titulo) || /^em curso$/i.test(titulo)) {
+                    const linhas = (contexto || '').split(/\n+/).map(limpar).filter(Boolean);
+                    const candidatos = linhas.filter(t =>
+                        !acao.test(t) && !/^em curso$/i.test(t) &&
+                        !/^(concursos|filtros|área:|ano de publicação:|estado:)/i.test(t) &&
+                        t.length <= 240
+                    );
+                    if (candidatos.length) titulo = candidatos[0];
                 }
                 return { titulo, url: href, contexto };
             })
         """)
-        links_paginacao = page.locator("a[href]").evaluate_all("els => els.map(a => a.href)")
-        return corpo, elementos, links_paginacao
+        links = page.locator("a[href]").evaluate_all("els => els.map(a => a.href)")
+        return corpo, elementos, links
 
     def adicionar_elementos(elementos):
+        antes = len(anuncios)
         for item in elementos:
             url_original = (item.get("url") or "").strip()
             if not url_original:
                 continue
-            url = normalizar_url(url_original)
+            url = normalizar_url(urljoin(URL_LISTA_ULS_ALGARVE, url_original))
             partes_url = urlparse(url)
             host = (partes_url.hostname or "").lower()
             caminho = partes_url.path.rstrip("/")
-
-            # Aceitar também o antigo domínio oficial chualgarve.min-saude.pt.
-            dominio_oficial = host == "min-saude.pt" or host.endswith(".min-saude.pt")
-            segmentos = caminho.split("/")
-            if not dominio_oficial or len(segmentos) < 3 or segmentos[1].casefold() != "concursos" or not segmentos[2]:
+            # Aceitar o domínio atual e o antigo, e não depender de uma
+            # correspondência exata do número de segmentos do URL.
+            dominio_oficial = host.endswith(".min-saude.pt") or host == "min-saude.pt"
+            if not dominio_oficial or "/concursos/" not in (caminho + "/").lower():
                 continue
-            if len(segmentos) > 3:
-                continue
+            parte_slug = caminho.lower().split("/concursos/", 1)[-1].strip("/")
+            if not parte_slug or "/" in parte_slug:
+                continue  # ignora a própria listagem e URLs de paginação
 
             titulo = " ".join((item.get("titulo") or "").split())
-            if not titulo or sem_acentos(titulo) in {"ver detalhes", "detalhes", "ler mais"}:
+            contexto = item.get("contexto", "") or ""
+            if not titulo or sem_acentos(titulo) in {"ver detalhes", "detalhes", "ler mais", "saber mais", "consultar"}:
+                # Último recurso: tirar o título do texto do cartão.
+                linhas = [" ".join(l.split()) for l in contexto.splitlines() if l.strip()]
+                candidatos = [
+                    l for l in linhas
+                    if sem_acentos(l) not in {"em curso", "ver detalhes", "detalhes", "ler mais", "saber mais"}
+                    and len(l) <= 240
+                    and not sem_acentos(l).startswith(("area:", "ano de publicacao:", "estado:"))
+                ]
+                titulo = candidatos[0] if candidatos else ""
+            if not titulo:
+                print(f"ULS Algarve: link de concurso sem título utilizável ignorado: {url}")
                 continue
             if re.search(r"\b(anulado|anulada|cancelado|cancelada|revogado|revogada)\b", sem_acentos(titulo)):
                 print(f"ULS Algarve: concurso anulado/cancelado ignorado: {titulo}")
                 continue
 
-            contexto = item.get("contexto", "") or ""
             if url not in anuncios or len(titulo) > len(anuncios[url]["titulo"]):
                 anuncios[url] = {"titulo": titulo, "contexto_lista": contexto}
+        return len(anuncios) - antes
 
-    # O filtro oficial status=active corresponde aos concursos em curso.
-    corpo_inicial, elementos_iniciais, links_paginacao = ler_pagina_listagem(URL_LISTA_ULS_ALGARVE)
-    adicionar_elementos(elementos_iniciais)
+    # O filtro oficial status=active corresponde à seleção "Em Curso".
+    corpo_inicial, elementos_iniciais, links_iniciais = ler_pagina_listagem(URL_LISTA_ULS_ALGARVE)
+    novos = adicionar_elementos(elementos_iniciais)
+    print(f"ULS Algarve: página inicial: {len(elementos_iniciais)} links analisados, {novos} anúncios novos.")
 
-    # Detetar a chave real de paginação em vez de assumir apenas 'pg'.
-    numero_paginas = []
-    parametro_pagina = "pg"
-    for link in links_paginacao:
+    # Usar os URLs reais de paginação devolvidos pelo site, evitando adivinhar
+    # parâmetros ou combinações de filtros.
+    paginas = {}
+    for link in links_iniciais:
         m = re.search(r"[?&](pg|page|paged|pagina)=(\d+)", link, re.IGNORECASE)
         if m:
-            parametro_pagina = m.group(1)
-            numero_paginas.append(int(m.group(2)))
-    ultima_pagina = min(max(numero_paginas, default=1), 100)
-
-    for numero in range(2, ultima_pagina + 1):
-        url_pagina = (
-            "https://www.ulsalg.min-saude.pt/concursos/"
-            f"?subcategory=0&year_filter=&status=active&{parametro_pagina}={numero}"
-        )
-        print(f"ULS Algarve: página {numero}/{ultima_pagina}...")
+            numero = int(m.group(2))
+            if 2 <= numero <= 100:
+                paginas[numero] = link
+    for numero in sorted(paginas):
+        print(f"ULS Algarve: a ler página {numero}...")
         try:
-            _, elementos, _ = ler_pagina_listagem(url_pagina)
-            adicionar_elementos(elementos)
+            _, elementos, _ = ler_pagina_listagem(paginas[numero])
+            novos = adicionar_elementos(elementos)
+            print(f"ULS Algarve: página {numero}: {len(elementos)} links analisados, {novos} anúncios novos.")
         except Exception as erro:
             print(f"ULS Algarve: não foi possível ler a página {numero}: {erro}")
 
     if not anuncios:
-        resumo = " ".join(corpo_inicial.split())[:350]
-        print(f"ULS Algarve: não foram identificados links de anúncios. Texto da listagem: {resumo}")
-        raise RuntimeError("A listagem da ULS não devolveu links de anúncios reconhecíveis; consultar o log do GitHub Actions.")
+        resumo = " ".join(corpo_inicial.split())[:500]
+        print(f"ULS Algarve: 0 anúncios reconhecidos. Texto da listagem: {resumo}")
+        raise RuntimeError("A listagem ULS foi carregada, mas não foram reconhecidos links de anúncios; consultar o log do GitHub Actions.")
 
     print(f"ULS Algarve: {len(anuncios)} concursos únicos encontrados no filtro ativo; a validar prazos...")
-
     for url, item in anuncios.items():
         titulo_lista = item["titulo"]
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(250)
-            texto_aviso = page.locator("body").inner_text(timeout=15000)
+            texto_aviso = page.locator("body").inner_text(timeout=20000)
         except Exception as erro:
             print(f"ULS Algarve: não foi possível ler o corpo do aviso ({titulo_lista}): {erro}")
             continue
 
-        # A ausência de um h1 não deve descartar um aviso se o corpo foi lido.
         titulo = titulo_lista
         for seletor in ("h1", "h2", "h3"):
             try:
@@ -1120,7 +1151,6 @@ def recolher_vagas_uls_algarve(page, data_referencia=None):
                         titulo = texto_cabecalho
                         break
             except Exception:
-                # Manter o título recolhido na listagem.
                 pass
 
         if re.search(r"\b(anulado|anulada|cancelado|cancelada|revogado|revogada)\b", sem_acentos(titulo + " " + texto_aviso[:1500])):
